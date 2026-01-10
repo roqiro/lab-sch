@@ -1,0 +1,466 @@
+
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lab Scheduler & Reminder</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @media print {
+            .no-print { display: none; }
+            .print-only { display: block; }
+            body { background: white; }
+            .card { border: 1px solid #ccc; box-shadow: none; }
+        }
+        .print-only { display: none; }
+        
+        /* Notification style */
+        #toast {
+            visibility: hidden;
+            min-width: 250px;
+            background-color: #333;
+            color: #fff;
+            text-align: center;
+            border-radius: 8px;
+            padding: 16px;
+            position: fixed;
+            z-index: 100;
+            right: 30px;
+            bottom: 30px;
+            font-size: 14px;
+        }
+        #toast.show {
+            visibility: visible;
+            animation: fadein 0.5s, fadeout 0.5s 2.5s;
+        }
+        @keyframes fadein { from {bottom: 0; opacity: 0;} to {bottom: 30px; opacity: 1;} }
+        @keyframes fadeout { from {bottom: 30px; opacity: 1;} to {bottom: 0; opacity: 0;} }
+    </style>
+</head>
+<body class="bg-slate-50 min-h-screen text-slate-800 font-sans">
+
+    <div id="toast"></div>
+
+    <div class="max-w-5xl mx-auto p-4 md:p-8">
+        <!-- Header -->
+        <header class="mb-8 no-print flex flex-wrap justify-between items-end gap-4">
+            <div>
+                <h1 class="text-3xl font-bold text-indigo-700 flex items-center gap-2">
+                    <i data-lucide="calendar-range"></i>
+                    Lab Scheduler & Reminder
+                </h1>
+                <p class="text-slate-500 mt-2">実験工程を可視化し、ブラウザに自動保存します。</p>
+            </div>
+            <div class="flex gap-2">
+                <button onclick="clearAllData()" class="text-xs text-red-500 hover:bg-red-50 px-2 py-1 rounded transition">
+                    全データをリセット
+                </button>
+            </div>
+        </header>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            
+            <!-- Left Panel: Settings & Presets -->
+            <div class="lg:col-span-1 space-y-6 no-print">
+                <section class="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+                    <h2 class="text-lg font-semibold mb-4 flex items-center gap-2">
+                        <i data-lucide="settings"></i> 基本設定
+                    </h2>
+                    
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium mb-1 text-slate-600">プロジェクト名</label>
+                            <input type="text" id="project-name" class="w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 outline-none transition">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium mb-1 text-slate-600">開始日 (Day 0)</label>
+                            <input type="date" id="start-date" class="w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 outline-none transition">
+                        </div>
+                    </div>
+                </section>
+
+                <section class="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+                    <h2 class="text-lg font-semibold mb-2 flex items-center gap-2">
+                        <i data-lucide="bookmark-plus"></i> カスタムプリセット
+                    </h2>
+                    <p class="text-xs text-slate-400 mb-4">現在の内容を保存して再利用できます</p>
+                    
+                    <div class="flex gap-2 mb-4">
+                        <input type="text" id="new-preset-name" placeholder="プロトコル名..." class="flex-1 text-sm border rounded-lg px-2 py-1 outline-none focus:ring-1 focus:ring-indigo-400">
+                        <button onclick="saveAsCustomPreset()" class="bg-emerald-500 hover:bg-emerald-600 text-white p-2 rounded-lg transition shadow-sm">
+                            <i data-lucide="save" class="w-4 h-4"></i>
+                        </button>
+                    </div>
+
+                    <div id="custom-presets-list" class="space-y-2 max-h-48 overflow-y-auto pr-1">
+                        <!-- Custom presets will be injected here -->
+                    </div>
+                </section>
+
+                <section class="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+                    <h2 class="text-lg font-semibold mb-4 flex items-center gap-2 text-slate-600">
+                        <i data-lucide="layers"></i> 標準プリセット
+                    </h2>
+                    <div class="grid grid-cols-1 gap-2">
+                        <button onclick="loadPreset('ips_chondro')" class="text-left px-3 py-2 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-sm font-medium transition">
+                            iPS細胞→軟骨分化 (30日間)
+                        </button>
+                        <button onclick="loadPreset('basic_culture')" class="text-left px-3 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-medium transition">
+                            基本継代サイクル (7日間)
+                        </button>
+                    </div>
+                </section>
+
+                <div class="pt-4">
+                    <button onclick="exportToICS()" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-4 rounded-xl shadow-lg flex items-center justify-center gap-2 transition transform active:scale-95">
+                        <i data-lucide="calendar-plus"></i>
+                        カレンダー用ICSを書き出し
+                    </button>
+                </div>
+            </div>
+
+            <!-- Right Panel: Editor & Preview -->
+            <div class="lg:col-span-2 space-y-6">
+                
+                <!-- Steps Editor -->
+                <section class="bg-white p-6 rounded-xl shadow-sm border border-slate-200 no-print">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-lg font-semibold flex items-center gap-2">
+                            <i data-lucide="list-checks"></i> 手順・ステップ
+                        </h2>
+                        <button onclick="addStep()" class="text-indigo-600 hover:bg-indigo-50 px-3 py-1 rounded-lg text-sm flex items-center gap-1 font-medium transition border border-indigo-200">
+                            <i data-lucide="plus-circle" class="w-4 h-4"></i> ステップ追加
+                        </button>
+                    </div>
+
+                    <div id="steps-container" class="space-y-3">
+                        <!-- Steps injected here -->
+                    </div>
+                </section>
+
+                <!-- Visualization / Checklist -->
+                <section id="print-area" class="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+                    <div class="flex justify-between items-center mb-6">
+                        <h2 class="text-lg font-semibold flex items-center gap-2">
+                            <i data-lucide="eye"></i> スケジュール一覧
+                        </h2>
+                        <div class="flex gap-2 no-print">
+                             <button onclick="window.print()" class="text-slate-500 hover:bg-slate-100 px-3 py-1 rounded-lg text-sm flex items-center gap-1 transition">
+                                <i data-lucide="printer" class="w-4 h-4"></i> 印刷
+                            </button>
+                        </div>
+                    </div>
+
+                    <div id="project-title-display" class="hidden print:block text-2xl font-bold mb-4 border-b-2 pb-2"></div>
+
+                    <div id="schedule-display" class="space-y-4">
+                        <p class="text-slate-400 text-center py-8">設定を読み込んでいます...</p>
+                    </div>
+                </section>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- State Management ---
+        let steps = [];
+        let customPresets = {};
+
+        const BUILTIN_PRESETS = {
+            ips_chondro: [
+                { day: 0, title: 'Seeding', desc: 'Basal Medium' },
+                { day: 1, title: 'Differentiation Day 1', desc: 'Induction Medium A' },
+                { day: 3, title: 'Medium Change', desc: 'Induction Medium A' },
+                { day: 5, title: 'Medium Change', desc: 'Induction Medium B' },
+                { day: 14, title: 'Maturation', desc: 'Maturation Medium' },
+                { day: 28, title: 'Harvesting', desc: 'Fixation or RNA extraction' }
+            ],
+            basic_culture: [
+                { day: 0, title: 'Passage (Seeding)', desc: '1:6 split' },
+                { day: 2, title: 'Medium Change', desc: 'Fresh Medium' },
+                { day: 4, title: 'Medium Change', desc: 'Fresh Medium' },
+                { day: 6, title: 'Confluency Check', desc: 'Check morphology' },
+                { day: 7, title: 'Next Passage', desc: 'Harvest cells' }
+            ]
+        };
+
+        // --- Core Logic ---
+        window.onload = () => {
+            loadAllFromStorage();
+            lucide.createIcons();
+            
+            // Listeners for auto-save
+            document.getElementById('start-date').addEventListener('change', () => { updateSchedule(); saveState(); });
+            document.getElementById('project-name').addEventListener('input', () => { updateSchedule(); saveState(); });
+        };
+
+        function showToast(message) {
+            const toast = document.getElementById("toast");
+            toast.innerText = message;
+            toast.className = "show";
+            setTimeout(() => { toast.className = toast.className.replace("show", ""); }, 3000);
+        }
+
+        // --- Storage Management ---
+        function saveState() {
+            const data = {
+                projectName: document.getElementById('project-name').value,
+                startDate: document.getElementById('start-date').value,
+                steps: steps
+            };
+            localStorage.setItem('lab_scheduler_current', JSON.stringify(data));
+        }
+
+        function loadAllFromStorage() {
+            // Load current workspace
+            const saved = localStorage.getItem('lab_scheduler_current');
+            if (saved) {
+                const data = JSON.parse(saved);
+                document.getElementById('project-name').value = data.projectName || '';
+                document.getElementById('start-date').value = data.startDate || new Date().toISOString().split('T')[0];
+                steps = data.steps || [];
+            } else {
+                // Default initial state
+                document.getElementById('start-date').value = new Date().toISOString().split('T')[0];
+                steps = [
+                    { id: Date.now(), day: 0, title: '開始 (Start)', desc: '実験開始' }
+                ];
+            }
+
+            // Load custom presets
+            const savedPresets = localStorage.getItem('lab_scheduler_presets');
+            if (savedPresets) {
+                customPresets = JSON.parse(savedPresets);
+            }
+            
+            renderSteps();
+            renderCustomPresets();
+            updateSchedule();
+        }
+
+        function saveAsCustomPreset() {
+            const name = document.getElementById('new-preset-name').value.trim();
+            if (!name) {
+                showToast("プリセット名を入力してください");
+                return;
+            }
+            
+            customPresets[name] = JSON.parse(JSON.stringify(steps)); // Deep copy
+            localStorage.setItem('lab_scheduler_presets', JSON.stringify(customPresets));
+            document.getElementById('new-preset-name').value = '';
+            renderCustomPresets();
+            showToast(`プリセット "${name}" を保存しました`);
+        }
+
+        function deletePreset(name) {
+            if (confirm(`プリセット "${name}" を削除しますか？`)) {
+                delete customPresets[name];
+                localStorage.setItem('lab_scheduler_presets', JSON.stringify(customPresets));
+                renderCustomPresets();
+                showToast("削除しました");
+            }
+        }
+
+        function clearAllData() {
+            if (confirm("全ての入力内容とカスタムプリセットを削除しますか？")) {
+                localStorage.clear();
+                location.reload();
+            }
+        }
+
+        // --- Rendering Functions ---
+        function renderSteps() {
+            const container = document.getElementById('steps-container');
+            container.innerHTML = '';
+
+            steps.sort((a, b) => a.day - b.day).forEach(step => {
+                const div = document.createElement('div');
+                div.className = 'flex flex-wrap md:flex-nowrap gap-2 items-start p-3 bg-slate-50 rounded-lg border border-slate-200 group transition-all hover:border-indigo-200';
+                div.innerHTML = `
+                    <div class="w-20">
+                        <label class="text-[10px] uppercase font-bold text-slate-400">Day</label>
+                        <input type="number" value="${step.day}" onchange="updateStep(${step.id}, 'day', this.value)" 
+                            class="w-full border rounded px-2 py-1 text-sm font-bold focus:bg-white outline-none">
+                    </div>
+                    <div class="flex-1 min-w-[150px]">
+                        <label class="text-[10px] uppercase font-bold text-slate-400">Task Name</label>
+                        <input type="text" value="${step.title}" onchange="updateStep(${step.id}, 'title', this.value)" 
+                            class="w-full border rounded px-2 py-1 text-sm focus:bg-white outline-none">
+                    </div>
+                    <div class="flex-[1.5] min-w-[200px]">
+                        <label class="text-[10px] uppercase font-bold text-slate-400">Notes / Reagents</label>
+                        <input type="text" value="${step.desc}" onchange="updateStep(${step.id}, 'desc', this.value)" 
+                            placeholder="培地組成など..." class="w-full border rounded px-2 py-1 text-sm focus:bg-white outline-none">
+                    </div>
+                    <button onclick="removeStep(${step.id})" class="mt-4 p-1 text-slate-300 hover:text-red-500 transition">
+                        <i data-lucide="trash-2" class="w-4 h-4"></i>
+                    </button>
+                `;
+                container.appendChild(div);
+            });
+            lucide.createIcons();
+            updateSchedule();
+        }
+
+        function renderCustomPresets() {
+            const container = document.getElementById('custom-presets-list');
+            container.innerHTML = '';
+            
+            const keys = Object.keys(customPresets);
+            if (keys.length === 0) {
+                container.innerHTML = '<p class="text-xs text-slate-400 italic">保存されたプリセットはありません</p>';
+                return;
+            }
+
+            keys.forEach(name => {
+                const div = document.createElement('div');
+                div.className = 'flex items-center justify-between bg-slate-50 p-2 rounded border border-slate-100 group';
+                div.innerHTML = `
+                    <button onclick="loadCustomPreset('${name}')" class="text-left text-xs font-medium text-slate-700 hover:text-indigo-600 truncate flex-1">
+                        ${name}
+                    </button>
+                    <button onclick="deletePreset('${name}')" class="text-slate-300 hover:text-red-400 opacity-0 group-hover:opacity-100 transition">
+                        <i data-lucide="x" class="w-3 h-3"></i>
+                    </button>
+                `;
+                container.appendChild(div);
+            });
+            lucide.createIcons();
+        }
+
+        function updateSchedule() {
+            const startDateVal = document.getElementById('start-date').value;
+            const projectName = document.getElementById('project-name').value;
+            const display = document.getElementById('schedule-display');
+            document.getElementById('project-title-display').innerText = projectName;
+
+            if (!startDateVal) {
+                display.innerHTML = '<p class="text-slate-400 text-center py-8">開始日を設定してください</p>';
+                return;
+            }
+
+            const baseDate = new Date(startDateVal);
+            display.innerHTML = '';
+
+            const sortedSteps = [...steps].sort((a, b) => a.day - b.day);
+
+            if (sortedSteps.length === 0) {
+                display.innerHTML = '<p class="text-slate-400 text-center py-8">ステップを追加してください</p>';
+                return;
+            }
+
+            sortedSteps.forEach(step => {
+                const current = new Date(baseDate);
+                current.setDate(baseDate.getDate() + parseInt(step.day));
+                
+                const dateStr = current.toLocaleDateString('ja-JP', { 
+                    year: 'numeric', month: '2-digit', day: '2-digit', weekday: 'short' 
+                });
+                const isWeekend = current.getDay() === 0 || current.getDay() === 6;
+
+                const div = document.createElement('div');
+                div.className = `flex items-center gap-4 p-4 rounded-lg border-l-4 transition-all ${isWeekend ? 'bg-orange-50 border-l-orange-400' : 'bg-white border-l-indigo-500 shadow-sm'}`;
+                div.innerHTML = `
+                    <div class="min-w-[120px]">
+                        <div class="text-xs font-bold text-slate-400 uppercase">Day ${step.day}</div>
+                        <div class="text-sm font-semibold ${isWeekend ? 'text-orange-600' : 'text-slate-700'}">${dateStr}</div>
+                    </div>
+                    <div class="flex-1">
+                        <div class="font-bold text-indigo-900">${step.title}</div>
+                        <div class="text-xs text-slate-500">${step.desc || ''}</div>
+                    </div>
+                    <div class="no-print">
+                         <input type="checkbox" class="w-5 h-5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer">
+                    </div>
+                `;
+                display.appendChild(div);
+            });
+        }
+
+        // --- Action Handlers ---
+        function addStep() {
+            const lastDay = steps.length > 0 ? Math.max(...steps.map(s => s.day)) : 0;
+            steps.push({ id: Date.now(), day: lastDay + 1, title: 'New Task', desc: '' });
+            renderSteps();
+            saveState();
+        }
+
+        function updateStep(id, field, value) {
+            const step = steps.find(s => s.id === id);
+            if (step) {
+                step[field] = field === 'day' ? parseInt(value) || 0 : value;
+                updateSchedule();
+                saveState();
+            }
+        }
+
+        function removeStep(id) {
+            steps = steps.filter(s => s.id !== id);
+            renderSteps();
+            saveState();
+        }
+
+        function loadPreset(key) {
+            const presetData = BUILTIN_PRESETS[key];
+            steps = presetData.map((s, idx) => ({ ...s, id: Date.now() + idx }));
+            renderSteps();
+            saveState();
+            showToast("標準プリセットを読み込みました");
+        }
+
+        function loadCustomPreset(name) {
+            const presetData = customPresets[name];
+            if (presetData) {
+                steps = JSON.parse(JSON.stringify(presetData)).map((s, idx) => ({ ...s, id: Date.now() + idx }));
+                renderSteps();
+                saveState();
+                showToast(`プリセット "${name}" を読み込みました`);
+            }
+        }
+
+        function exportToICS() {
+            const startDateVal = document.getElementById('start-date').value;
+            const projectName = document.getElementById('project-name').value || "Experiment";
+            if (!startDateVal) {
+                showToast("開始日を設定してください");
+                return;
+            }
+
+            const baseDate = new Date(startDateVal);
+            let icsContent = [
+                'BEGIN:VCALENDAR',
+                'VERSION:2.0',
+                'PRODID:-//Lab Scheduler//JP',
+                'CALSCALE:GREGORIAN',
+                'METHOD:PUBLISH'
+            ];
+
+            steps.forEach(step => {
+                const targetDate = new Date(baseDate);
+                targetDate.setDate(baseDate.getDate() + parseInt(step.day));
+                const dateStr = targetDate.toISOString().split('T')[0].replace(/-/g, '');
+                
+                icsContent.push('BEGIN:VEVENT');
+                icsContent.push(`SUMMARY:[Lab] ${projectName}: Day ${step.day} ${step.title}`);
+                icsContent.push(`DTSTART;VALUE=DATE:${dateStr}`);
+                icsContent.push(`DTEND;VALUE=DATE:${dateStr}`);
+                icsContent.push(`DESCRIPTION:${step.desc || ''}`);
+                icsContent.push('STATUS:CONFIRMED');
+                icsContent.push('END:VEVENT');
+            });
+
+            icsContent.push('END:VCALENDAR');
+
+            const blob = new Blob([icsContent.join('\r\n')], { type: 'text/calendar;charset=utf-8' });
+            const link = document.createElement('a');
+            link.href = window.URL.createObjectURL(blob);
+            link.setAttribute('download', `${projectName}_schedule.ics`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            showToast("ICSファイルをダウンロードしました");
+        }
+    </script>
+</body>
+</html>

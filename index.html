@@ -428,6 +428,8 @@
             }
 
             const baseDate = new Date(startDateVal);
+            const now = new Date().toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z'; // DTSTAMP用
+            
             let icsContent = [
                 'BEGIN:VCALENDAR',
                 'VERSION:2.0',
@@ -436,15 +438,25 @@
                 'METHOD:PUBLISH'
             ];
 
-            steps.forEach(step => {
+            steps.forEach((step, index) => {
                 const targetDate = new Date(baseDate);
                 targetDate.setDate(baseDate.getDate() + parseInt(step.day));
                 const dateStr = targetDate.toISOString().split('T')[0].replace(/-/g, '');
                 
+                // 次の日の日付（終日イベントの終了日は翌日に設定するのが標準的です）
+                const endDate = new Date(targetDate);
+                endDate.setDate(targetDate.getDate() + 1);
+                const endDateStr = endDate.toISOString().split('T')[0].replace(/-/g, '');
+
+                // UIDの生成（タイムスタンプ＋インデックス＋ドメイン）
+                const uid = `${now}-${index}@lab-scheduler.local`;
+
                 icsContent.push('BEGIN:VEVENT');
+                icsContent.push(`UID:${uid}`); // 必須: ユニークID
+                icsContent.push(`DTSTAMP:${now}`); // 必須: 作成日時
                 icsContent.push(`SUMMARY:[Lab] ${projectName}: Day ${step.day} ${step.title}`);
                 icsContent.push(`DTSTART;VALUE=DATE:${dateStr}`);
-                icsContent.push(`DTEND;VALUE=DATE:${dateStr}`);
+                icsContent.push(`DTEND;VALUE=DATE:${endDateStr}`); // 終了日を翌日に
                 icsContent.push(`DESCRIPTION:${step.desc || ''}`);
                 icsContent.push('STATUS:CONFIRMED');
                 icsContent.push('END:VEVENT');

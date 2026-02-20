@@ -4,10 +4,15 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Lab Scheduler & Reminder</title>
+
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/lucide@latest"></script>
+
   <!-- URL共有のための圧縮（推奨） -->
   <script src="https://cdn.jsdelivr.net/npm/lz-string@1.5.0/libs/lz-string.min.js"></script>
+
+  <!-- Drag & Drop -->
+  <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
 
   <style>
     @media print {
@@ -39,11 +44,13 @@
     }
     @keyframes fadein { from {bottom: 0; opacity: 0;} to {bottom: 30px; opacity: 1;} }
     @keyframes fadeout { from {bottom: 30px; opacity: 1;} to {bottom: 0; opacity: 0;} }
+
+    /* Sortable ghost */
+    .sortable-ghost { opacity: 0.35; }
   </style>
 </head>
 
 <body class="bg-slate-50 min-h-screen text-slate-800 font-sans">
-
   <div id="toast"></div>
 
   <div class="max-w-5xl mx-auto p-4 md:p-8">
@@ -64,10 +71,8 @@
     </header>
 
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-
-      <!-- Left Panel: Settings & Presets -->
+      <!-- Left Panel -->
       <div class="lg:col-span-1 space-y-6 no-print">
-
         <section class="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
           <h2 class="text-lg font-semibold mb-4 flex items-center gap-2">
             <i data-lucide="settings"></i> 基本設定
@@ -98,9 +103,7 @@
             </button>
           </div>
 
-          <div id="custom-presets-list" class="space-y-2 max-h-48 overflow-y-auto pr-1">
-            <!-- Custom presets will be injected here -->
-          </div>
+          <div id="custom-presets-list" class="space-y-2 max-h-48 overflow-y-auto pr-1"></div>
         </section>
 
         <!-- Share / Import UI -->
@@ -167,9 +170,8 @@
         </div>
       </div>
 
-      <!-- Right Panel: Editor & Preview -->
+      <!-- Right Panel -->
       <div class="lg:col-span-2 space-y-6">
-
         <!-- Steps Editor -->
         <section class="bg-white p-6 rounded-xl shadow-sm border border-slate-200 no-print">
           <div class="flex justify-between items-center mb-4">
@@ -181,12 +183,19 @@
             </button>
           </div>
 
-          <div id="steps-container" class="space-y-3">
-            <!-- Steps injected here -->
+          <!-- Dayグループごとに描画 -->
+          <div id="steps-container" class="space-y-4"></div>
+
+          <div class="mt-4 text-xs text-slate-500">
+            <div class="font-semibold mb-1">操作</div>
+            <ul class="list-disc pl-5">
+              <li>ドラッグ：同じDay内で並べ替え、または別Dayへ移動（Dayも自動更新）</li>
+              <li>Dayを手入力で変更：自動で該当Dayグループへ移動</li>
+            </ul>
           </div>
         </section>
 
-        <!-- Visualization / Checklist -->
+        <!-- Schedule -->
         <section id="print-area" class="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
           <div class="flex justify-between items-center mb-6">
             <h2 class="text-lg font-semibold flex items-center gap-2">
@@ -214,6 +223,9 @@
     let steps = [];
     let customPresets = {};
 
+    // Sortable instances (Dayグループごと)
+    let daySortables = [];
+
     const BUILTIN_PRESETS = {
       ips_chondro: [
         { day: 0, title: 'Seeding', desc: 'Basal Medium' },
@@ -237,7 +249,6 @@
       loadAllFromStorage();
       lucide.createIcons();
 
-      // Listeners for auto-save
       document.getElementById('start-date').addEventListener('change', () => { updateSchedule(); saveState(); });
       document.getElementById('project-name').addEventListener('input', () => { updateSchedule(); saveState(); });
 
@@ -263,27 +274,28 @@
     }
 
     function loadAllFromStorage() {
-      // Load current workspace
       const saved = localStorage.getItem('lab_scheduler_current');
       if (saved) {
         const data = JSON.parse(saved);
         document.getElementById('project-name').value = data.projectName || '';
         document.getElementById('start-date').value = data.startDate || new Date().toISOString().split('T')[0];
-        steps = data.steps || [];
+
+        // order互換（古いデータにorderが無い場合がある）
+        steps = (data.steps || []).map((s, idx) => ({
+          ...s,
+          order: (typeof s.order === 'number') ? s.order : idx
+        }));
       } else {
-        // Default initial state
         document.getElementById('start-date').value = new Date().toISOString().split('T')[0];
         steps = [
-          { id: Date.now(), day: 0, title: '開始 (Start)', desc: '実験開始' }
+          { id: Date.now(), day: 0, title: '開始 (Start)', desc: '実験開始', order: 0 }
         ];
       }
 
-      // Load custom presets
       const savedPresets = localStorage.getItem('lab_scheduler_presets');
-      if (savedPresets) {
-        customPresets = JSON.parse(savedPresets);
-      }
+      if (savedPresets) customPresets = JSON.parse(savedPresets);
 
+      normalizeOrdering();
       renderSteps();
       renderCustomPresets();
       updateSchedule();
@@ -291,12 +303,9 @@
 
     function saveAsCustomPreset() {
       const name = document.getElementById('new-preset-name').value.trim();
-      if (!name) {
-        showToast('プリセット名を入力してください');
-        return;
-      }
+      if (!name) return showToast('プリセット名を入力してください');
 
-      customPresets[name] = JSON.parse(JSON.stringify(steps)); // Deep copy
+      customPresets[name] = JSON.parse(JSON.stringify(steps));
       localStorage.setItem('lab_scheduler_presets', JSON.stringify(customPresets));
       document.getElementById('new-preset-name').value = '';
       renderCustomPresets();
@@ -304,51 +313,105 @@
     }
 
     function deletePreset(name) {
-      if (confirm(`プリセット "${name}" を削除しますか？`)) {
-        delete customPresets[name];
-        localStorage.setItem('lab_scheduler_presets', JSON.stringify(customPresets));
-        renderCustomPresets();
-        showToast('削除しました');
-      }
+      if (!confirm(`プリセット "${name}" を削除しますか？`)) return;
+      delete customPresets[name];
+      localStorage.setItem('lab_scheduler_presets', JSON.stringify(customPresets));
+      renderCustomPresets();
+      showToast('削除しました');
     }
 
     function clearAllData() {
-      if (confirm('全ての入力内容とカスタムプリセットを削除しますか？')) {
-        localStorage.clear();
-        location.reload();
-      }
+      if (!confirm('全ての入力内容とカスタムプリセットを削除しますか？')) return;
+      localStorage.clear();
+      location.reload();
     }
 
     // --- Rendering Functions ---
     function renderSteps() {
+      destroySortables();
+
       const container = document.getElementById('steps-container');
       container.innerHTML = '';
 
-      steps.sort((a, b) => a.day - b.day).forEach(step => {
-        const div = document.createElement('div');
-        div.className = 'flex flex-wrap md:flex-nowrap gap-2 items-start p-3 bg-slate-50 rounded-lg border border-slate-200 group transition-all hover:border-indigo-200';
-        div.innerHTML = `
-          <div class="w-20">
-            <label class="text-[10px] uppercase font-bold text-slate-400">Day</label>
-            <input type="number" value="${step.day}" onchange="updateStep(${step.id}, 'day', this.value)"
-              class="w-full border rounded px-2 py-1 text-sm font-bold focus:bg-white outline-none">
-          </div>
-          <div class="flex-1 min-w-[150px]">
-            <label class="text-[10px] uppercase font-bold text-slate-400">Task Name</label>
-            <input type="text" value="${escapeHtml(step.title)}" onchange="updateStep(${step.id}, 'title', this.value)"
-              class="w-full border rounded px-2 py-1 text-sm focus:bg-white outline-none">
-          </div>
-          <div class="flex-[1.5] min-w-[200px]">
-            <label class="text-[10px] uppercase font-bold text-slate-400">Notes / Reagents</label>
-            <input type="text" value="${escapeHtml(step.desc)}" onchange="updateStep(${step.id}, 'desc', this.value)"
-              placeholder="培地組成など..." class="w-full border rounded px-2 py-1 text-sm focus:bg-white outline-none">
-          </div>
-          <button onclick="removeStep(${step.id})" class="mt-4 p-1 text-slate-300 hover:text-red-500 transition">
-            <i data-lucide="trash-2" class="w-4 h-4"></i>
-          </button>
-        `;
-        container.appendChild(div);
+      // Day順に自動整列（同Day内は order 順）
+      const sorted = [...steps].sort((a, b) => {
+        const ad = parseInt(a.day) || 0;
+        const bd = parseInt(b.day) || 0;
+        if (ad !== bd) return ad - bd;
+        return (a.order ?? 0) - (b.order ?? 0);
       });
+
+      // Dayごとにグルーピング
+      const map = new Map();
+      for (const s of sorted) {
+        const d = parseInt(s.day) || 0;
+        if (!map.has(d)) map.set(d, []);
+        map.get(d).push(s);
+      }
+      const days = Array.from(map.keys()).sort((a, b) => a - b);
+
+      if (days.length === 0) {
+        container.innerHTML = '<p class="text-sm text-slate-400 italic">ステップがありません</p>';
+        lucide.createIcons();
+        return;
+      }
+
+      for (const day of days) {
+        const group = document.createElement('div');
+        group.className = 'rounded-xl border border-slate-200 bg-slate-50';
+        group.innerHTML = `
+          <div class="flex items-center justify-between px-4 py-3 border-b border-slate-200 bg-white rounded-t-xl">
+            <div class="font-bold text-slate-700 flex items-center gap-2">
+              <span class="inline-flex items-center justify-center w-7 h-7 rounded-lg bg-indigo-50 text-indigo-700 text-sm font-extrabold">D</span>
+              <span>Day ${day}</span>
+            </div>
+            <div class="text-xs text-slate-400">このDay内でドラッグして並べ替え / 別Dayへ移動もOK</div>
+          </div>
+          <div class="day-steps space-y-3 p-4" data-day="${day}"></div>
+        `;
+        container.appendChild(group);
+
+        const list = group.querySelector('.day-steps');
+        const items = map.get(day) || [];
+
+        items.forEach(step => {
+          const row = document.createElement('div');
+          row.className = 'flex flex-wrap md:flex-nowrap gap-2 items-start p-3 bg-white rounded-lg border border-slate-200 group transition-all hover:border-indigo-200';
+          row.dataset.stepId = String(step.id);
+          row.innerHTML = `
+            <button type="button" class="drag-handle mt-4 p-1 text-slate-300 hover:text-slate-600 cursor-grab active:cursor-grabbing">
+              <i data-lucide="grip-vertical" class="w-4 h-4"></i>
+            </button>
+
+            <div class="w-24">
+              <label class="text-[10px] uppercase font-bold text-slate-400">Day</label>
+              <input type="number" value="${parseInt(step.day) || 0}" onchange="updateStep(${step.id}, 'day', this.value)"
+                class="w-full border rounded px-2 py-1 text-sm font-bold focus:bg-white outline-none">
+              <div class="text-[10px] text-slate-400 mt-1">変更すると自動整列</div>
+            </div>
+
+            <div class="flex-1 min-w-[150px]">
+              <label class="text-[10px] uppercase font-bold text-slate-400">Task Name</label>
+              <input type="text" value="${escapeHtml(step.title)}" onchange="updateStep(${step.id}, 'title', this.value)"
+                class="w-full border rounded px-2 py-1 text-sm focus:bg-white outline-none">
+            </div>
+
+            <div class="flex-[1.5] min-w-[200px]">
+              <label class="text-[10px] uppercase font-bold text-slate-400">Notes / Reagents</label>
+              <input type="text" value="${escapeHtml(step.desc)}" onchange="updateStep(${step.id}, 'desc', this.value)"
+                placeholder="培地組成など..." class="w-full border rounded px-2 py-1 text-sm focus:bg-white outline-none">
+            </div>
+
+            <button onclick="removeStep(${step.id})" class="mt-4 p-1 text-slate-300 hover:text-red-500 transition">
+              <i data-lucide="trash-2" class="w-4 h-4"></i>
+            </button>
+          `;
+          list.appendChild(row);
+        });
+
+        initSortableForDayList(list);
+      }
+
       lucide.createIcons();
       updateSchedule();
     }
@@ -393,7 +456,12 @@
       const baseDate = new Date(startDateVal);
       display.innerHTML = '';
 
-      const sortedSteps = [...steps].sort((a, b) => a.day - b.day);
+      const sortedSteps = [...steps].sort((a, b) => {
+        const ad = parseInt(a.day) || 0;
+        const bd = parseInt(b.day) || 0;
+        if (ad !== bd) return ad - bd;
+        return (a.order ?? 0) - (b.order ?? 0);
+      });
 
       if (sortedSteps.length === 0) {
         display.innerHTML = '<p class="text-slate-400 text-center py-8">ステップを追加してください</p>';
@@ -402,7 +470,7 @@
 
       sortedSteps.forEach(step => {
         const current = new Date(baseDate);
-        current.setDate(baseDate.getDate() + parseInt(step.day));
+        current.setDate(baseDate.getDate() + (parseInt(step.day) || 0));
 
         const dateStr = current.toLocaleDateString('ja-JP', {
           year: 'numeric', month: '2-digit', day: '2-digit', weekday: 'short'
@@ -413,7 +481,7 @@
         div.className = `flex items-center gap-4 p-4 rounded-lg border-l-4 transition-all ${isWeekend ? 'bg-orange-50 border-l-orange-400' : 'bg-white border-l-indigo-500 shadow-sm'}`;
         div.innerHTML = `
           <div class="min-w-[120px]">
-            <div class="text-xs font-bold text-slate-400 uppercase">Day ${step.day}</div>
+            <div class="text-xs font-bold text-slate-400 uppercase">Day ${parseInt(step.day) || 0}</div>
             <div class="text-sm font-semibold ${isWeekend ? 'text-orange-600' : 'text-slate-700'}">${dateStr}</div>
           </div>
           <div class="flex-1">
@@ -428,32 +496,98 @@
       });
     }
 
+    // --- Drag & Drop (Day順自動整列に最適化) ---
+    function initSortableForDayList(listEl) {
+      const sortable = new Sortable(listEl, {
+        group: 'daySteps',
+        handle: '.drag-handle',
+        animation: 150,
+        ghostClass: 'sortable-ghost',
+        onEnd: () => {
+          syncStepsFromDom();
+          saveState();
+          renderSteps();       // Day順自動整列（ここで常に整列）
+          showToast('並び順を保存しました（Day順に自動整列）');
+        }
+      });
+      daySortables.push(sortable);
+    }
+
+    function destroySortables() {
+      for (const s of daySortables) {
+        try { s.destroy(); } catch {}
+      }
+      daySortables = [];
+    }
+
+    // DOM（Dayグループ）から steps を反映：
+    // - どのDayコンテナにいるかで day を確定
+    // - 同じDay内の表示順で order を振り直す
+    function syncStepsFromDom() {
+      const container = document.getElementById('steps-container');
+      const lists = container.querySelectorAll('.day-steps');
+      const byId = new Map(steps.map(s => [Number(s.id), s]));
+
+      const next = [];
+      for (const list of lists) {
+        const day = parseInt(list.dataset.day) || 0;
+        const children = Array.from(list.children);
+
+        children.forEach((row, idx) => {
+          const id = Number(row.dataset.stepId);
+          const s = byId.get(id);
+          if (!s) return;
+          next.push({
+            ...s,
+            day: day,     // ← ここが重要：移動先Dayへ自動で更新
+            order: idx
+          });
+        });
+      }
+
+      steps = next;
+      normalizeOrdering();
+    }
+
     // --- Action Handlers ---
     function addStep() {
-      const lastDay = steps.length > 0 ? Math.max(...steps.map(s => s.day)) : 0;
-      steps.push({ id: Date.now(), day: lastDay + 1, title: 'New Task', desc: '' });
+      const lastDay = steps.length > 0 ? Math.max(...steps.map(s => parseInt(s.day) || 0)) : 0;
+      const nextId = Date.now();
+
+      // 新規は「最終Day+1」に追加、orderは0
+      steps.push({ id: nextId, day: lastDay + 1, title: 'New Task', desc: '', order: 0 });
+
+      normalizeOrdering();
       renderSteps();
       saveState();
     }
 
     function updateStep(id, field, value) {
       const step = steps.find(s => s.id === id);
-      if (step) {
-        step[field] = field === 'day' ? parseInt(value) || 0 : value;
-        updateSchedule();
-        saveState();
+      if (!step) return;
+
+      if (field === 'day') {
+        step.day = parseInt(value) || 0;
+      } else {
+        step[field] = value;
       }
+
+      normalizeOrdering();
+      renderSteps();   // Day順自動整列のため、即リレンダ
+      saveState();
     }
 
     function removeStep(id) {
       steps = steps.filter(s => s.id !== id);
+      normalizeOrdering();
       renderSteps();
       saveState();
     }
 
     function loadPreset(key) {
       const presetData = BUILTIN_PRESETS[key];
-      steps = presetData.map((s, idx) => ({ ...s, id: Date.now() + idx }));
+      steps = presetData.map((s, idx) => ({ ...s, id: Date.now() + idx, order: idx }));
+      normalizeOrdering();
       renderSteps();
       saveState();
       showToast('標準プリセットを読み込みました');
@@ -461,25 +595,48 @@
 
     function loadCustomPreset(name) {
       const presetData = customPresets[name];
-      if (presetData) {
-        steps = JSON.parse(JSON.stringify(presetData)).map((s, idx) => ({ ...s, id: Date.now() + idx }));
-        renderSteps();
-        saveState();
-        showToast(`プリセット "${name}" を読み込みました`);
-      }
+      if (!presetData) return;
+
+      // orderが無い古いプリセット互換
+      steps = JSON.parse(JSON.stringify(presetData)).map((s, idx) => ({
+        ...s,
+        id: Date.now() + idx,
+        order: (typeof s.order === 'number') ? s.order : idx
+      }));
+
+      normalizeOrdering();
+      renderSteps();
+      saveState();
+      showToast(`プリセット "${name}" を読み込みました`);
+    }
+
+    // Day順自動整列のための正規化：
+    // Dayごとに order を 0..n-1 に振り直す
+    function normalizeOrdering() {
+      const sorted = [...steps].sort((a, b) => {
+        const ad = parseInt(a.day) || 0;
+        const bd = parseInt(b.day) || 0;
+        if (ad !== bd) return ad - bd;
+        return (a.order ?? 0) - (b.order ?? 0);
+      });
+
+      const counters = new Map();
+      steps = sorted.map(s => {
+        const d = parseInt(s.day) || 0;
+        const c = counters.get(d) ?? 0;
+        counters.set(d, c + 1);
+        return { ...s, day: d, order: c };
+      });
     }
 
     // --- ICS Export ---
     function exportToICS() {
       const startDateVal = document.getElementById('start-date').value;
       const projectName = document.getElementById('project-name').value || 'Experiment';
-      if (!startDateVal) {
-        showToast('開始日を設定してください');
-        return;
-      }
+      if (!startDateVal) return showToast('開始日を設定してください');
 
       const baseDate = new Date(startDateVal);
-      const now = new Date().toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z'; // DTSTAMP用
+      const now = new Date().toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
 
       let icsContent = [
         'BEGIN:VCALENDAR',
@@ -489,23 +646,28 @@
         'METHOD:PUBLISH'
       ];
 
-      steps.forEach((step, index) => {
+      const sortedSteps = [...steps].sort((a, b) => {
+        const ad = parseInt(a.day) || 0;
+        const bd = parseInt(b.day) || 0;
+        if (ad !== bd) return ad - bd;
+        return (a.order ?? 0) - (b.order ?? 0);
+      });
+
+      sortedSteps.forEach((step, index) => {
         const targetDate = new Date(baseDate);
-        targetDate.setDate(baseDate.getDate() + parseInt(step.day));
+        targetDate.setDate(baseDate.getDate() + (parseInt(step.day) || 0));
         const dateStr = targetDate.toISOString().split('T')[0].replace(/-/g, '');
 
-        // 次の日の日付（終日イベントの終了日は翌日に設定するのが標準的です）
         const endDate = new Date(targetDate);
         endDate.setDate(targetDate.getDate() + 1);
         const endDateStr = endDate.toISOString().split('T')[0].replace(/-/g, '');
 
-        // UIDの生成（タイムスタンプ＋インデックス＋ドメイン）
         const uid = `${now}-${index}@lab-scheduler.local`;
 
         icsContent.push('BEGIN:VEVENT');
         icsContent.push(`UID:${uid}`);
         icsContent.push(`DTSTAMP:${now}`);
-        icsContent.push(`SUMMARY:[Lab] ${escapeIcsText(projectName)}: Day ${step.day} ${escapeIcsText(step.title)}`);
+        icsContent.push(`SUMMARY:[Lab] ${escapeIcsText(projectName)}: Day ${parseInt(step.day) || 0} ${escapeIcsText(step.title)}`);
         icsContent.push(`DTSTART;VALUE=DATE:${dateStr}`);
         icsContent.push(`DTEND;VALUE=DATE:${endDateStr}`);
         icsContent.push(`DESCRIPTION:${escapeIcsText(step.desc || '')}`);
@@ -532,10 +694,18 @@
 
     function buildSharePayload(optionalName) {
       const projectName = document.getElementById('project-name').value || '';
+      // 공유용에는 order도入れておく（同Day内の順序が安定する）
+      const payloadSteps = [...steps].sort((a, b) => {
+        const ad = parseInt(a.day) || 0;
+        const bd = parseInt(b.day) || 0;
+        if (ad !== bd) return ad - bd;
+        return (a.order ?? 0) - (b.order ?? 0);
+      }).map(s => ({ day: parseInt(s.day) || 0, title: s.title, desc: s.desc, order: s.order ?? 0 }));
+
       return {
         v: SHARE_VERSION,
         name: optionalName || projectName || 'Shared Preset',
-        steps: steps.map(s => ({ day: s.day, title: s.title, desc: s.desc }))
+        steps: payloadSteps
       };
     }
 
@@ -544,7 +714,6 @@
         const payload = buildSharePayload();
         const json = JSON.stringify(payload);
 
-        // 圧縮してURLのhashに入れる（サーバ不要）
         let encoded;
         if (window.LZString) {
           encoded = LZString.compressToEncodedURIComponent(json);
@@ -593,18 +762,17 @@
       if (!payload || typeof payload !== 'object') return false;
       if (!Array.isArray(payload.steps)) return false;
 
-      const importedSteps = payload.steps
+      steps = payload.steps
         .filter(s => s && (typeof s.day === 'number' || typeof s.day === 'string'))
         .map((s, idx) => ({
           id: Date.now() + idx,
           day: parseInt(s.day) || 0,
           title: String(s.title || 'Task'),
-          desc: String(s.desc || '')
+          desc: String(s.desc || ''),
+          order: (typeof s.order === 'number') ? s.order : idx
         }));
 
-      if (importedSteps.length === 0) return false;
-
-      steps = importedSteps;
+      normalizeOrdering();
       renderSteps();
       saveState();
 
@@ -617,7 +785,6 @@
       } else {
         showToast('プリセットを読み込みました');
       }
-
       return true;
     }
 
@@ -626,21 +793,19 @@
       if (!text) return showToast('貼り付け内容が空です');
 
       try {
-        // URL貼り付け
         if (text.includes('#preset=')) {
           const u = new URL(text);
           const encoded = (u.hash || '').replace('#preset=', '').trim();
           if (!encoded) throw new Error('no preset');
 
           let json;
-          if (window.LZString) {
-            json = LZString.decompressFromEncodedURIComponent(encoded);
-          } else {
+          if (window.LZString) json = LZString.decompressFromEncodedURIComponent(encoded);
+          else {
             const decoded = decodeURIComponent(encoded);
             json = decodeURIComponent(escape(atob(decoded)));
           }
-          const payload = JSON.parse(json);
 
+          const payload = JSON.parse(json);
           const overrideName = (document.getElementById('import-name').value || '').trim();
           if (overrideName) payload.name = overrideName;
 
@@ -648,18 +813,17 @@
           return;
         }
 
-        // preset=... だけ貼り付け
         if (text.startsWith('preset=')) {
           const encoded = text.replace('preset=', '').trim();
+
           let json;
-          if (window.LZString) {
-            json = LZString.decompressFromEncodedURIComponent(encoded);
-          } else {
+          if (window.LZString) json = LZString.decompressFromEncodedURIComponent(encoded);
+          else {
             const decoded = decodeURIComponent(encoded);
             json = decodeURIComponent(escape(atob(decoded)));
           }
-          const payload = JSON.parse(json);
 
+          const payload = JSON.parse(json);
           const overrideName = (document.getElementById('import-name').value || '').trim();
           if (overrideName) payload.name = overrideName;
 
@@ -667,7 +831,6 @@
           return;
         }
 
-        // JSON直貼り
         const payload = JSON.parse(text);
         const overrideName = (document.getElementById('import-name').value || '').trim();
         if (overrideName) payload.name = overrideName;
@@ -717,7 +880,7 @@
     }
 
     // =========================
-    // 小物ユーティリティ
+    // Utils
     // =========================
     function sanitizeFilename(name) {
       return String(name).replace(/[^a-zA-Z0-9_-]+/g, '_').slice(0, 80) || 'preset';
@@ -733,7 +896,6 @@
     }
 
     function escapeIcsText(str) {
-      // icsは改行やカンマ、セミコロンの扱いがあるため最低限エスケープ
       return String(str ?? '')
         .replace(/\\/g, '\\\\')
         .replace(/\n/g, '\\n')

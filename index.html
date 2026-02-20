@@ -222,6 +222,8 @@
     // --- State Management ---
     let steps = [];
     let customPresets = {};
+    // 「いま読み込んでいるカスタムプリセット名」を覚えておく（名称変更時の追従用）
+    let currentCustomPresetName = null;
 
     // Sortable instances (Dayグループごと)
     let daySortables = [];
@@ -301,21 +303,60 @@
       updateSchedule();
     }
 
+    function persistCustomPresets() {
+      localStorage.setItem('lab_scheduler_presets', JSON.stringify(customPresets));
+    }
+
     function saveAsCustomPreset() {
       const name = document.getElementById('new-preset-name').value.trim();
       if (!name) return showToast('プリセット名を入力してください');
 
+      // 同名がある場合は上書き確認
+      if (customPresets[name]) {
+        const ok = confirm(`同名のプリセット "${name}" があります。上書きしますか？`);
+        if (!ok) return;
+      }
+
       customPresets[name] = JSON.parse(JSON.stringify(steps));
-      localStorage.setItem('lab_scheduler_presets', JSON.stringify(customPresets));
+      persistCustomPresets();
       document.getElementById('new-preset-name').value = '';
+      currentCustomPresetName = name;
       renderCustomPresets();
       showToast(`プリセット "${name}" を保存しました`);
+    }
+
+    function renamePreset(oldName) {
+      if (!customPresets[oldName]) return;
+
+      const proposed = prompt('新しいプリセット名を入力してください', oldName);
+      if (proposed === null) return; // キャンセル
+      const newName = (proposed || '').trim();
+      if (!newName) return showToast('プリセット名が空です');
+
+      if (newName === oldName) return;
+
+      if (customPresets[newName]) {
+        const ok = confirm(`"${newName}" は既に存在します。上書きしますか？`);
+        if (!ok) return;
+      }
+
+      // 値を移して旧キーを削除
+      customPresets[newName] = customPresets[oldName];
+      delete customPresets[oldName];
+
+      // 現在読み込み中のプリセット名も追従
+      if (currentCustomPresetName === oldName) currentCustomPresetName = newName;
+
+      persistCustomPresets();
+      renderCustomPresets();
+      showToast(`プリセット名を "${oldName}" → "${newName}" に変更しました`);
     }
 
     function deletePreset(name) {
       if (!confirm(`プリセット "${name}" を削除しますか？`)) return;
       delete customPresets[name];
-      localStorage.setItem('lab_scheduler_presets', JSON.stringify(customPresets));
+      if (currentCustomPresetName === name) currentCustomPresetName = null;
+      persistCustomPresets();
       renderCustomPresets();
       showToast('削除しました');
     }
@@ -426,16 +467,24 @@
         return;
       }
 
-      keys.forEach(name => {
+      // 名前順
+      keys.sort((a,b) => a.localeCompare(b, 'ja')).forEach(name => {
+        const isCurrent = (currentCustomPresetName === name);
+
         const div = document.createElement('div');
         div.className = 'flex items-center justify-between bg-slate-50 p-2 rounded border border-slate-100 group';
         div.innerHTML = `
-          <button onclick="loadCustomPreset(${JSON.stringify(name)})" class="text-left text-xs font-medium text-slate-700 hover:text-indigo-600 truncate flex-1">
-            ${escapeHtml(name)}
+          <button onclick="loadCustomPreset(${JSON.stringify(name)})" class="text-left text-xs font-medium ${isCurrent ? 'text-indigo-700' : 'text-slate-700'} hover:text-indigo-600 truncate flex-1">
+            ${escapeHtml(name)} ${isCurrent ? '<span class="ml-2 text-[10px] font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded">ACTIVE</span>' : ''}
           </button>
-          <button onclick="deletePreset(${JSON.stringify(name)})" class="text-slate-300 hover:text-red-400 opacity-0 group-hover:opacity-100 transition">
-            <i data-lucide="x" class="w-3 h-3"></i>
-          </button>
+          <div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition">
+            <button onclick="renamePreset(${JSON.stringify(name)})" class="text-slate-300 hover:text-slate-700 transition" title="名前を変更">
+              <i data-lucide="pencil" class="w-3 h-3"></i>
+            </button>
+            <button onclick="deletePreset(${JSON.stringify(name)})" class="text-slate-300 hover:text-red-400 transition" title="削除">
+              <i data-lucide="x" class="w-3 h-3"></i>
+            </button>
+          </div>
         `;
         container.appendChild(div);
       });
@@ -539,7 +588,7 @@
           if (!s) return;
           next.push({
             ...s,
-            day: day,     // ← ここが重要：移動先Dayへ自動で更新
+            day: day,     // ← 移動先Dayへ自動で更新
             order: idx
           });
         });
@@ -553,8 +602,6 @@
     function addStep() {
       const lastDay = steps.length > 0 ? Math.max(...steps.map(s => parseInt(s.day) || 0)) : 0;
       const nextId = Date.now();
-
-      // 新規は「最終Day+1」に追加、orderは0
       steps.push({ id: nextId, day: lastDay + 1, title: 'New Task', desc: '', order: 0 });
 
       normalizeOrdering();
@@ -566,14 +613,11 @@
       const step = steps.find(s => s.id === id);
       if (!step) return;
 
-      if (field === 'day') {
-        step.day = parseInt(value) || 0;
-      } else {
-        step[field] = value;
-      }
+      if (field === 'day') step.day = parseInt(value) || 0;
+      else step[field] = value;
 
       normalizeOrdering();
-      renderSteps();   // Day順自動整列のため、即リレンダ
+      renderSteps();   // Day順自動整列のため即リレンダ
       saveState();
     }
 
@@ -587,9 +631,11 @@
     function loadPreset(key) {
       const presetData = BUILTIN_PRESETS[key];
       steps = presetData.map((s, idx) => ({ ...s, id: Date.now() + idx, order: idx }));
+      currentCustomPresetName = null; // 標準プリセットは「カスタム」ではない
       normalizeOrdering();
       renderSteps();
       saveState();
+      renderCustomPresets();
       showToast('標準プリセットを読み込みました');
     }
 
@@ -604,9 +650,11 @@
         order: (typeof s.order === 'number') ? s.order : idx
       }));
 
+      currentCustomPresetName = name;
       normalizeOrdering();
       renderSteps();
       saveState();
+      renderCustomPresets();
       showToast(`プリセット "${name}" を読み込みました`);
     }
 
@@ -694,7 +742,7 @@
 
     function buildSharePayload(optionalName) {
       const projectName = document.getElementById('project-name').value || '';
-      // 공유용에는 order도入れておく（同Day内の順序が安定する）
+
       const payloadSteps = [...steps].sort((a, b) => {
         const ad = parseInt(a.day) || 0;
         const bd = parseInt(b.day) || 0;
@@ -779,7 +827,8 @@
       if (saveAsPreset) {
         const name = String(payload.name || 'Shared Preset');
         customPresets[name] = JSON.parse(JSON.stringify(steps));
-        localStorage.setItem('lab_scheduler_presets', JSON.stringify(customPresets));
+        persistCustomPresets();
+        currentCustomPresetName = name;
         renderCustomPresets();
         showToast(`共有プリセット「${name}」を読み込みました`);
       } else {

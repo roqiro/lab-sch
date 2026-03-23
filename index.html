@@ -7,11 +7,7 @@
 
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/lucide@latest"></script>
-
-  <!-- URL共有のための圧縮（推奨） -->
   <script src="https://cdn.jsdelivr.net/npm/lz-string@1.5.0/libs/lz-string.min.js"></script>
-
-  <!-- Drag & Drop -->
   <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
 
   <style>
@@ -23,7 +19,6 @@
     }
     .print-only { display: none; }
 
-    /* Notification style */
     #toast {
       visibility: hidden;
       min-width: 250px;
@@ -42,10 +37,9 @@
       visibility: visible;
       animation: fadein 0.5s, fadeout 0.5s 2.5s;
     }
-    @keyframes fadein { from {bottom: 0; opacity: 0;} to {bottom: 30px; opacity: 1;} }
-    @keyframes fadeout { from {bottom: 30px; opacity: 1;} to {bottom: 0; opacity: 0;} }
+    @keyframes fadein { from { bottom: 0; opacity: 0; } to { bottom: 30px; opacity: 1; } }
+    @keyframes fadeout { from { bottom: 30px; opacity: 1; } to { bottom: 0; opacity: 0; } }
 
-    /* Sortable ghost */
     .sortable-ghost { opacity: 0.35; }
   </style>
 </head>
@@ -54,7 +48,6 @@
   <div id="toast"></div>
 
   <div class="max-w-5xl mx-auto p-4 md:p-8">
-    <!-- Header -->
     <header class="mb-8 no-print flex flex-wrap justify-between items-end gap-4">
       <div>
         <h1 class="text-3xl font-bold text-indigo-700 flex items-center gap-2">
@@ -71,7 +64,6 @@
     </header>
 
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-      <!-- Left Panel -->
       <div class="lg:col-span-1 space-y-6 no-print">
         <section class="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
           <h2 class="text-lg font-semibold mb-4 flex items-center gap-2">
@@ -106,7 +98,6 @@
           <div id="custom-presets-list" class="space-y-2 max-h-48 overflow-y-auto pr-1"></div>
         </section>
 
-        <!-- Share / Import UI -->
         <section class="bg-white p-6 rounded-xl shadow-sm border border-slate-200 no-print">
           <h2 class="text-lg font-semibold mb-2 flex items-center gap-2">
             <i data-lucide="share-2"></i> 共有
@@ -129,7 +120,7 @@
 
             <div>
               <label class="block text-xs font-medium mb-1 text-slate-600">共有JSONを貼り付けてインポート</label>
-              <textarea id="import-json" rows="4" placeholder='{"v":1,"name":"My Protocol","steps":[...]} または shareリンク（#preset=...）' class="w-full border rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-indigo-500 outline-none transition"></textarea>
+              <textarea id="import-json" rows="4" placeholder='{"v":1,"name":"My Protocol","steps":[...]} または shareリンク（#preset=... / preset=... / 完全URL）' class="w-full border rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-indigo-500 outline-none transition"></textarea>
               <div class="flex gap-2 mt-2">
                 <input id="import-name" type="text" placeholder="プリセット名（省略可）" class="flex-1 text-sm border rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 outline-none transition" />
                 <button onclick="importFromTextarea()" class="bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-bold px-4 rounded-lg transition shadow-sm">
@@ -170,9 +161,7 @@
         </div>
       </div>
 
-      <!-- Right Panel -->
       <div class="lg:col-span-2 space-y-6">
-        <!-- Steps Editor -->
         <section class="bg-white p-6 rounded-xl shadow-sm border border-slate-200 no-print">
           <div class="flex justify-between items-center mb-4">
             <h2 class="text-lg font-semibold flex items-center gap-2">
@@ -183,7 +172,6 @@
             </button>
           </div>
 
-          <!-- Dayグループごとに描画 -->
           <div id="steps-container" class="space-y-4"></div>
 
           <div class="mt-4 text-xs text-slate-500">
@@ -195,7 +183,6 @@
           </div>
         </section>
 
-        <!-- Schedule -->
         <section id="print-area" class="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
           <div class="flex justify-between items-center mb-6">
             <h2 class="text-lg font-semibold flex items-center gap-2">
@@ -219,14 +206,18 @@
   </div>
 
   <script>
-    // --- State Management ---
     let steps = [];
     let customPresets = {};
-    // 「いま読み込んでいるカスタムプリセット名」を覚えておく（名称変更時の追従用）
     let currentCustomPresetName = null;
-
-    // Sortable instances (Dayグループごと)
+    let isCurrentPresetDirty = false;
     let daySortables = [];
+
+    const STORAGE_KEYS = {
+      current: 'lab_scheduler_current',
+      presets: 'lab_scheduler_presets'
+    };
+
+    const SHARE_VERSION = 1;
 
     const BUILTIN_PRESETS = {
       ips_chondro: [
@@ -246,15 +237,19 @@
       ]
     };
 
-    // --- Core Logic ---
     window.onload = () => {
       loadAllFromStorage();
       lucide.createIcons();
 
-      document.getElementById('start-date').addEventListener('change', () => { updateSchedule(); saveState(); });
-      document.getElementById('project-name').addEventListener('input', () => { updateSchedule(); saveState(); });
+      document.getElementById('start-date').addEventListener('change', () => {
+        updateSchedule();
+        saveState();
+      });
+      document.getElementById('project-name').addEventListener('input', () => {
+        updateSchedule();
+        saveState();
+      });
 
-      // 共有リンク（#preset=...）があれば自動で読み込み
       tryParseShareFromUrl();
     };
 
@@ -262,40 +257,121 @@
       const toast = document.getElementById('toast');
       toast.innerText = message;
       toast.className = 'show';
-      setTimeout(() => { toast.className = toast.className.replace('show', ''); }, 3000);
+      setTimeout(() => {
+        toast.className = toast.className.replace('show', '');
+      }, 3000);
     }
 
-    // --- Storage Management ---
+    function getDefaultStep() {
+      return { id: generateId(), day: 0, title: '開始 (Start)', desc: '実験開始', order: 0 };
+    }
+
+    function generateId() {
+      return Date.now() + Math.floor(Math.random() * 1000000);
+    }
+
+    function getTodayLocalInputValue() {
+      return formatInputDate(new Date());
+    }
+
+    function formatInputDate(date) {
+      const y = date.getFullYear();
+      const m = String(date.getMonth() + 1).padStart(2, '0');
+      const d = String(date.getDate()).padStart(2, '0');
+      return `${y}-${m}-${d}`;
+    }
+
+    function parseLocalDateInput(value) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value || ''))) return null;
+      const [y, m, d] = value.split('-').map(Number);
+      const date = new Date(y, m - 1, d);
+      if (
+        date.getFullYear() !== y ||
+        date.getMonth() !== m - 1 ||
+        date.getDate() !== d
+      ) {
+        return null;
+      }
+      return date;
+    }
+
+    function addDaysLocal(date, days) {
+      return new Date(date.getFullYear(), date.getMonth(), date.getDate() + days);
+    }
+
+    function formatDisplayDate(date) {
+      return date.toLocaleDateString('ja-JP', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        weekday: 'short'
+      });
+    }
+
+    function formatIcsDate(date) {
+      const y = date.getFullYear();
+      const m = String(date.getMonth() + 1).padStart(2, '0');
+      const d = String(date.getDate()).padStart(2, '0');
+      return `${y}${m}${d}`;
+    }
+
+    function makeUtcTimestamp(date = new Date()) {
+      return date.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
+    }
+
+    function safeParseJson(text, fallback) {
+      try {
+        return JSON.parse(text);
+      } catch (e) {
+        console.warn('JSON parse failed:', e);
+        return fallback;
+      }
+    }
+
     function saveState() {
       const data = {
         projectName: document.getElementById('project-name').value,
         startDate: document.getElementById('start-date').value,
-        steps: steps
+        steps,
+        currentCustomPresetName,
+        isCurrentPresetDirty
       };
-      localStorage.setItem('lab_scheduler_current', JSON.stringify(data));
+      localStorage.setItem(STORAGE_KEYS.current, JSON.stringify(data));
     }
 
     function loadAllFromStorage() {
-      const saved = localStorage.getItem('lab_scheduler_current');
-      if (saved) {
-        const data = JSON.parse(saved);
-        document.getElementById('project-name').value = data.projectName || '';
-        document.getElementById('start-date').value = data.startDate || new Date().toISOString().split('T')[0];
+      const saved = localStorage.getItem(STORAGE_KEYS.current);
+      const currentData = saved ? safeParseJson(saved, null) : null;
 
-        // order互換（古いデータにorderが無い場合がある）
-        steps = (data.steps || []).map((s, idx) => ({
-          ...s,
-          order: (typeof s.order === 'number') ? s.order : idx
-        }));
+      if (currentData && typeof currentData === 'object') {
+        document.getElementById('project-name').value = String(currentData.projectName || '');
+        document.getElementById('start-date').value = parseLocalDateInput(currentData.startDate)
+          ? currentData.startDate
+          : getTodayLocalInputValue();
+
+        steps = Array.isArray(currentData.steps)
+          ? currentData.steps.map((s, idx) => ({
+              id: Number.isFinite(Number(s.id)) ? Number(s.id) : generateId(),
+              day: parseInt(s.day, 10) || 0,
+              title: String(s.title || 'Task'),
+              desc: String(s.desc || ''),
+              order: typeof s.order === 'number' ? s.order : idx
+            }))
+          : [getDefaultStep()];
+
+        currentCustomPresetName = currentData.currentCustomPresetName || null;
+        isCurrentPresetDirty = Boolean(currentData.isCurrentPresetDirty);
       } else {
-        document.getElementById('start-date').value = new Date().toISOString().split('T')[0];
-        steps = [
-          { id: Date.now(), day: 0, title: '開始 (Start)', desc: '実験開始', order: 0 }
-        ];
+        document.getElementById('project-name').value = '';
+        document.getElementById('start-date').value = getTodayLocalInputValue();
+        steps = [getDefaultStep()];
+        currentCustomPresetName = null;
+        isCurrentPresetDirty = false;
       }
 
-      const savedPresets = localStorage.getItem('lab_scheduler_presets');
-      if (savedPresets) customPresets = JSON.parse(savedPresets);
+      const savedPresets = localStorage.getItem(STORAGE_KEYS.presets);
+      const parsedPresets = savedPresets ? safeParseJson(savedPresets, {}) : {};
+      customPresets = (parsedPresets && typeof parsedPresets === 'object' && !Array.isArray(parsedPresets)) ? parsedPresets : {};
 
       normalizeOrdering();
       renderSteps();
@@ -304,24 +380,35 @@
     }
 
     function persistCustomPresets() {
-      localStorage.setItem('lab_scheduler_presets', JSON.stringify(customPresets));
+      localStorage.setItem(STORAGE_KEYS.presets, JSON.stringify(customPresets));
+    }
+
+    function setCurrentPresetState(name, dirty) {
+      currentCustomPresetName = name || null;
+      isCurrentPresetDirty = Boolean(dirty && name);
+      renderCustomPresets();
+    }
+
+    function markCurrentPresetDirty() {
+      if (!currentCustomPresetName || isCurrentPresetDirty) return;
+      isCurrentPresetDirty = true;
+      renderCustomPresets();
     }
 
     function saveAsCustomPreset() {
       const name = document.getElementById('new-preset-name').value.trim();
       if (!name) return showToast('プリセット名を入力してください');
 
-      // 同名がある場合は上書き確認
       if (customPresets[name]) {
         const ok = confirm(`同名のプリセット "${name}" があります。上書きしますか？`);
         if (!ok) return;
       }
 
-      customPresets[name] = JSON.parse(JSON.stringify(steps));
+      customPresets[name] = cloneStepsForPreset(steps);
       persistCustomPresets();
       document.getElementById('new-preset-name').value = '';
-      currentCustomPresetName = name;
-      renderCustomPresets();
+      setCurrentPresetState(name, false);
+      saveState();
       showToast(`プリセット "${name}" を保存しました`);
     }
 
@@ -329,10 +416,9 @@
       if (!customPresets[oldName]) return;
 
       const proposed = prompt('新しいプリセット名を入力してください', oldName);
-      if (proposed === null) return; // キャンセル
-      const newName = (proposed || '').trim();
+      if (proposed === null) return;
+      const newName = proposed.trim();
       if (!newName) return showToast('プリセット名が空です');
-
       if (newName === oldName) return;
 
       if (customPresets[newName]) {
@@ -340,14 +426,13 @@
         if (!ok) return;
       }
 
-      // 値を移して旧キーを削除
       customPresets[newName] = customPresets[oldName];
       delete customPresets[oldName];
 
-      // 現在読み込み中のプリセット名も追従
       if (currentCustomPresetName === oldName) currentCustomPresetName = newName;
 
       persistCustomPresets();
+      saveState();
       renderCustomPresets();
       showToast(`プリセット名を "${oldName}" → "${newName}" に変更しました`);
     }
@@ -355,37 +440,33 @@
     function deletePreset(name) {
       if (!confirm(`プリセット "${name}" を削除しますか？`)) return;
       delete customPresets[name];
-      if (currentCustomPresetName === name) currentCustomPresetName = null;
+      if (currentCustomPresetName === name) {
+        currentCustomPresetName = null;
+        isCurrentPresetDirty = false;
+      }
       persistCustomPresets();
+      saveState();
       renderCustomPresets();
       showToast('削除しました');
     }
 
     function clearAllData() {
-      if (!confirm('全ての入力内容とカスタムプリセットを削除しますか？')) return;
-      localStorage.clear();
+      if (!confirm('このアプリの入力内容とカスタムプリセットを削除しますか？')) return;
+      localStorage.removeItem(STORAGE_KEYS.current);
+      localStorage.removeItem(STORAGE_KEYS.presets);
       location.reload();
     }
 
-    // --- Rendering Functions ---
     function renderSteps() {
       destroySortables();
 
       const container = document.getElementById('steps-container');
       container.innerHTML = '';
 
-      // Day順に自動整列（同Day内は order 順）
-      const sorted = [...steps].sort((a, b) => {
-        const ad = parseInt(a.day) || 0;
-        const bd = parseInt(b.day) || 0;
-        if (ad !== bd) return ad - bd;
-        return (a.order ?? 0) - (b.order ?? 0);
-      });
-
-      // Dayごとにグルーピング
+      const sorted = getSortedSteps();
       const map = new Map();
       for (const s of sorted) {
-        const d = parseInt(s.day) || 0;
+        const d = parseInt(s.day, 10) || 0;
         if (!map.has(d)) map.set(d, []);
         map.get(d).push(s);
       }
@@ -426,7 +507,7 @@
 
             <div class="w-24">
               <label class="text-[10px] uppercase font-bold text-slate-400">Day</label>
-              <input type="number" value="${parseInt(step.day) || 0}" onchange="updateStep(${step.id}, 'day', this.value)"
+              <input type="number" value="${parseInt(step.day, 10) || 0}" onchange="updateStep(${step.id}, 'day', this.value)"
                 class="w-full border rounded px-2 py-1 text-sm font-bold focus:bg-white outline-none">
               <div class="text-[10px] text-slate-400 mt-1">変更すると自動整列</div>
             </div>
@@ -467,15 +548,17 @@
         return;
       }
 
-      // 名前順
-      keys.sort((a,b) => a.localeCompare(b, 'ja')).forEach(name => {
-        const isCurrent = (currentCustomPresetName === name);
+      keys.sort((a, b) => a.localeCompare(b, 'ja')).forEach(name => {
+        const isCurrent = currentCustomPresetName === name;
+        const badge = isCurrent
+          ? `<span class="ml-2 text-[10px] font-bold ${isCurrentPresetDirty ? 'text-amber-700 bg-amber-50' : 'text-indigo-600 bg-indigo-50'} px-1.5 py-0.5 rounded">${isCurrentPresetDirty ? 'EDITED' : 'LOADED'}</span>`
+          : '';
 
         const div = document.createElement('div');
         div.className = 'flex items-center justify-between bg-slate-50 p-2 rounded border border-slate-100 group';
         div.innerHTML = `
           <button onclick="loadCustomPreset(${JSON.stringify(name)})" class="text-left text-xs font-medium ${isCurrent ? 'text-indigo-700' : 'text-slate-700'} hover:text-indigo-600 truncate flex-1">
-            ${escapeHtml(name)} ${isCurrent ? '<span class="ml-2 text-[10px] font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded">ACTIVE</span>' : ''}
+            ${escapeHtml(name)} ${badge}
           </button>
           <div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition">
             <button onclick="renamePreset(${JSON.stringify(name)})" class="text-slate-300 hover:text-slate-700 transition" title="名前を変更">
@@ -488,6 +571,7 @@
         `;
         container.appendChild(div);
       });
+
       lucide.createIcons();
     }
 
@@ -497,20 +581,14 @@
       const display = document.getElementById('schedule-display');
       document.getElementById('project-title-display').innerText = projectName;
 
-      if (!startDateVal) {
+      const baseDate = parseLocalDateInput(startDateVal);
+      if (!baseDate) {
         display.innerHTML = '<p class="text-slate-400 text-center py-8">開始日を設定してください</p>';
         return;
       }
 
-      const baseDate = new Date(startDateVal);
       display.innerHTML = '';
-
-      const sortedSteps = [...steps].sort((a, b) => {
-        const ad = parseInt(a.day) || 0;
-        const bd = parseInt(b.day) || 0;
-        if (ad !== bd) return ad - bd;
-        return (a.order ?? 0) - (b.order ?? 0);
-      });
+      const sortedSteps = getSortedSteps();
 
       if (sortedSteps.length === 0) {
         display.innerHTML = '<p class="text-slate-400 text-center py-8">ステップを追加してください</p>';
@@ -518,19 +596,15 @@
       }
 
       sortedSteps.forEach(step => {
-        const current = new Date(baseDate);
-        current.setDate(baseDate.getDate() + (parseInt(step.day) || 0));
-
-        const dateStr = current.toLocaleDateString('ja-JP', {
-          year: 'numeric', month: '2-digit', day: '2-digit', weekday: 'short'
-        });
+        const current = addDaysLocal(baseDate, parseInt(step.day, 10) || 0);
+        const dateStr = formatDisplayDate(current);
         const isWeekend = current.getDay() === 0 || current.getDay() === 6;
 
         const div = document.createElement('div');
         div.className = `flex items-center gap-4 p-4 rounded-lg border-l-4 transition-all ${isWeekend ? 'bg-orange-50 border-l-orange-400' : 'bg-white border-l-indigo-500 shadow-sm'}`;
         div.innerHTML = `
           <div class="min-w-[120px]">
-            <div class="text-xs font-bold text-slate-400 uppercase">Day ${parseInt(step.day) || 0}</div>
+            <div class="text-xs font-bold text-slate-400 uppercase">Day ${parseInt(step.day, 10) || 0}</div>
             <div class="text-sm font-semibold ${isWeekend ? 'text-orange-600' : 'text-slate-700'}">${dateStr}</div>
           </div>
           <div class="flex-1">
@@ -545,7 +619,6 @@
       });
     }
 
-    // --- Drag & Drop (Day順自動整列に最適化) ---
     function initSortableForDayList(listEl) {
       const sortable = new Sortable(listEl, {
         group: 'daySteps',
@@ -554,8 +627,9 @@
         ghostClass: 'sortable-ghost',
         onEnd: () => {
           syncStepsFromDom();
+          markCurrentPresetDirty();
           saveState();
-          renderSteps();       // Day順自動整列（ここで常に整列）
+          renderSteps();
           showToast('並び順を保存しました（Day順に自動整列）');
         }
       });
@@ -564,14 +638,13 @@
 
     function destroySortables() {
       for (const s of daySortables) {
-        try { s.destroy(); } catch {}
+        try {
+          s.destroy();
+        } catch (_) {}
       }
       daySortables = [];
     }
 
-    // DOM（Dayグループ）から steps を反映：
-    // - どのDayコンテナにいるかで day を確定
-    // - 同じDay内の表示順で order を振り直す
     function syncStepsFromDom() {
       const container = document.getElementById('steps-container');
       const lists = container.querySelectorAll('.day-steps');
@@ -579,16 +652,16 @@
 
       const next = [];
       for (const list of lists) {
-        const day = parseInt(list.dataset.day) || 0;
+        const day = parseInt(list.dataset.day, 10) || 0;
         const children = Array.from(list.children);
 
         children.forEach((row, idx) => {
           const id = Number(row.dataset.stepId);
-          const s = byId.get(id);
-          if (!s) return;
+          const step = byId.get(id);
+          if (!step) return;
           next.push({
-            ...s,
-            day: day,     // ← 移動先Dayへ自動で更新
+            ...step,
+            day,
             order: idx
           });
         });
@@ -598,13 +671,11 @@
       normalizeOrdering();
     }
 
-    // --- Action Handlers ---
     function addStep() {
-      const lastDay = steps.length > 0 ? Math.max(...steps.map(s => parseInt(s.day) || 0)) : 0;
-      const nextId = Date.now();
-      steps.push({ id: nextId, day: lastDay + 1, title: 'New Task', desc: '', order: 0 });
-
+      const lastDay = steps.length > 0 ? Math.max(...steps.map(s => parseInt(s.day, 10) || 0)) : 0;
+      steps.push({ id: generateId(), day: lastDay + 1, title: 'New Task', desc: '', order: 0 });
       normalizeOrdering();
+      markCurrentPresetDirty();
       renderSteps();
       saveState();
     }
@@ -613,80 +684,108 @@
       const step = steps.find(s => s.id === id);
       if (!step) return;
 
-      if (field === 'day') step.day = parseInt(value) || 0;
-      else step[field] = value;
+      if (field === 'day') {
+        step.day = parseInt(value, 10) || 0;
+      } else {
+        step[field] = value;
+      }
 
       normalizeOrdering();
-      renderSteps();   // Day順自動整列のため即リレンダ
+      markCurrentPresetDirty();
+      renderSteps();
       saveState();
     }
 
     function removeStep(id) {
       steps = steps.filter(s => s.id !== id);
       normalizeOrdering();
+      markCurrentPresetDirty();
       renderSteps();
       saveState();
     }
 
     function loadPreset(key) {
       const presetData = BUILTIN_PRESETS[key];
-      steps = presetData.map((s, idx) => ({ ...s, id: Date.now() + idx, order: idx }));
-      currentCustomPresetName = null; // 標準プリセットは「カスタム」ではない
+      if (!Array.isArray(presetData)) return;
+
+      steps = presetData.map((s, idx) => ({
+        ...s,
+        id: generateId(),
+        order: typeof s.order === 'number' ? s.order : idx
+      }));
+
+      setCurrentPresetState(null, false);
       normalizeOrdering();
       renderSteps();
       saveState();
-      renderCustomPresets();
       showToast('標準プリセットを読み込みました');
     }
 
     function loadCustomPreset(name) {
       const presetData = customPresets[name];
-      if (!presetData) return;
+      if (!Array.isArray(presetData)) return;
 
-      // orderが無い古いプリセット互換
-      steps = JSON.parse(JSON.stringify(presetData)).map((s, idx) => ({
-        ...s,
-        id: Date.now() + idx,
-        order: (typeof s.order === 'number') ? s.order : idx
+      steps = presetData.map((s, idx) => ({
+        id: generateId(),
+        day: parseInt(s.day, 10) || 0,
+        title: String(s.title || 'Task'),
+        desc: String(s.desc || ''),
+        order: typeof s.order === 'number' ? s.order : idx
       }));
 
-      currentCustomPresetName = name;
       normalizeOrdering();
+      setCurrentPresetState(name, false);
       renderSteps();
       saveState();
-      renderCustomPresets();
       showToast(`プリセット "${name}" を読み込みました`);
     }
 
-    // Day順自動整列のための正規化：
-    // Dayごとに order を 0..n-1 に振り直す
     function normalizeOrdering() {
-      const sorted = [...steps].sort((a, b) => {
-        const ad = parseInt(a.day) || 0;
-        const bd = parseInt(b.day) || 0;
-        if (ad !== bd) return ad - bd;
-        return (a.order ?? 0) - (b.order ?? 0);
-      });
-
+      const sorted = getSortedSteps();
       const counters = new Map();
       steps = sorted.map(s => {
-        const d = parseInt(s.day) || 0;
-        const c = counters.get(d) ?? 0;
-        counters.set(d, c + 1);
-        return { ...s, day: d, order: c };
+        const day = parseInt(s.day, 10) || 0;
+        const currentCount = counters.get(day) ?? 0;
+        counters.set(day, currentCount + 1);
+        return { ...s, day, order: currentCount };
       });
     }
 
-    // --- ICS Export ---
+    function getSortedSteps() {
+      return [...steps].sort((a, b) => {
+        const ad = parseInt(a.day, 10) || 0;
+        const bd = parseInt(b.day, 10) || 0;
+        if (ad !== bd) return ad - bd;
+        return (a.order ?? 0) - (b.order ?? 0);
+      });
+    }
+
+    function cloneStepsForPreset(stepList) {
+      return getSortedStepsFrom(stepList).map((s, idx) => ({
+        day: parseInt(s.day, 10) || 0,
+        title: String(s.title || 'Task'),
+        desc: String(s.desc || ''),
+        order: typeof s.order === 'number' ? s.order : idx
+      }));
+    }
+
+    function getSortedStepsFrom(stepList) {
+      return [...stepList].sort((a, b) => {
+        const ad = parseInt(a.day, 10) || 0;
+        const bd = parseInt(b.day, 10) || 0;
+        if (ad !== bd) return ad - bd;
+        return (a.order ?? 0) - (b.order ?? 0);
+      });
+    }
+
     function exportToICS() {
       const startDateVal = document.getElementById('start-date').value;
       const projectName = document.getElementById('project-name').value || 'Experiment';
-      if (!startDateVal) return showToast('開始日を設定してください');
+      const baseDate = parseLocalDateInput(startDateVal);
+      if (!baseDate) return showToast('開始日を設定してください');
 
-      const baseDate = new Date(startDateVal);
-      const now = new Date().toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
-
-      let icsContent = [
+      const nowStamp = makeUtcTimestamp();
+      const icsLines = [
         'BEGIN:VCALENDAR',
         'VERSION:2.0',
         'PRODID:-//Lab Scheduler//JP',
@@ -694,111 +793,102 @@
         'METHOD:PUBLISH'
       ];
 
-      const sortedSteps = [...steps].sort((a, b) => {
-        const ad = parseInt(a.day) || 0;
-        const bd = parseInt(b.day) || 0;
-        if (ad !== bd) return ad - bd;
-        return (a.order ?? 0) - (b.order ?? 0);
-      });
+      const sortedSteps = getSortedSteps();
 
       sortedSteps.forEach((step, index) => {
-        const targetDate = new Date(baseDate);
-        targetDate.setDate(baseDate.getDate() + (parseInt(step.day) || 0));
-        const dateStr = targetDate.toISOString().split('T')[0].replace(/-/g, '');
+        const stepDay = parseInt(step.day, 10) || 0;
+        const targetDate = addDaysLocal(baseDate, stepDay);
+        const endDate = addDaysLocal(targetDate, 1);
+        const uid = `${Date.now()}-${index}-${Math.random().toString(36).slice(2, 10)}@lab-scheduler.local`;
 
-        const endDate = new Date(targetDate);
-        endDate.setDate(targetDate.getDate() + 1);
-        const endDateStr = endDate.toISOString().split('T')[0].replace(/-/g, '');
+        const description = [
+          `Project: ${projectName}`,
+          `Day: ${stepDay}`,
+          `Task: ${step.title || ''}`,
+          `Notes: ${step.desc || ''}`
+        ].join('\n');
 
-        const uid = `${now}-${index}@lab-scheduler.local`;
-
-        icsContent.push('BEGIN:VEVENT');
-        icsContent.push(`UID:${uid}`);
-        icsContent.push(`DTSTAMP:${now}`);
-        icsContent.push(`SUMMARY:[Lab] ${escapeIcsText(projectName)}: Day ${parseInt(step.day) || 0} ${escapeIcsText(step.title)}`);
-        icsContent.push(`DTSTART;VALUE=DATE:${dateStr}`);
-        icsContent.push(`DTEND;VALUE=DATE:${endDateStr}`);
-        icsContent.push(`DESCRIPTION:${escapeIcsText(step.desc || '')}`);
-        icsContent.push('STATUS:CONFIRMED');
-        icsContent.push('END:VEVENT');
+        icsLines.push('BEGIN:VEVENT');
+        icsLines.push(...foldIcsLine(`UID:${uid}`));
+        icsLines.push(...foldIcsLine(`DTSTAMP:${nowStamp}`));
+        icsLines.push(...foldIcsLine(`SUMMARY:[Lab] ${escapeIcsText(projectName)}: Day ${stepDay} ${escapeIcsText(step.title)}`));
+        icsLines.push(...foldIcsLine(`DTSTART;VALUE=DATE:${formatIcsDate(targetDate)}`));
+        icsLines.push(...foldIcsLine(`DTEND;VALUE=DATE:${formatIcsDate(endDate)}`));
+        icsLines.push(...foldIcsLine(`DESCRIPTION:${escapeIcsText(description)}`));
+        icsLines.push('STATUS:CONFIRMED');
+        icsLines.push('END:VEVENT');
       });
 
-      icsContent.push('END:VCALENDAR');
+      icsLines.push('END:VCALENDAR');
 
-      const blob = new Blob([icsContent.join('\r\n')], { type: 'text/calendar;charset=utf-8' });
-      const link = document.createElement('a');
-      link.href = window.URL.createObjectURL(blob);
-      link.setAttribute('download', `${sanitizeFilename(projectName)}_schedule.ics`);
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+      const blob = new Blob([icsLines.join('\r\n')], { type: 'text/calendar;charset=utf-8' });
+      downloadBlob(blob, `${sanitizeFilename(projectName)}_schedule.ics`);
       showToast('ICSファイルをダウンロードしました');
     }
 
-    // =========================
-    // 共有（URL / JSON）
-    // =========================
-    const SHARE_VERSION = 1;
-
-    function buildSharePayload(optionalName) {
-      const projectName = document.getElementById('project-name').value || '';
-
-      const payloadSteps = [...steps].sort((a, b) => {
-        const ad = parseInt(a.day) || 0;
-        const bd = parseInt(b.day) || 0;
-        if (ad !== bd) return ad - bd;
-        return (a.order ?? 0) - (b.order ?? 0);
-      }).map(s => ({ day: parseInt(s.day) || 0, title: s.title, desc: s.desc, order: s.order ?? 0 }));
-
-      return {
-        v: SHARE_VERSION,
-        name: optionalName || projectName || 'Shared Preset',
-        steps: payloadSteps
-      };
-    }
-
-    function copyShareLink() {
+    async function copyShareLink() {
       try {
         const payload = buildSharePayload();
-        const json = JSON.stringify(payload);
-
-        let encoded;
-        if (window.LZString) {
-          encoded = LZString.compressToEncodedURIComponent(json);
-        } else {
-          encoded = encodeURIComponent(btoa(unescape(encodeURIComponent(json))));
-        }
-
+        const encoded = encodeSharePayload(payload);
         const url = new URL(window.location.href);
         url.hash = `preset=${encoded}`;
-
-        navigator.clipboard.writeText(url.toString());
+        await copyTextToClipboard(url.toString());
         showToast('共有リンクをコピーしました');
       } catch (e) {
         console.error(e);
-        showToast('共有リンクの生成に失敗しました');
+        showToast('共有リンクの生成またはコピーに失敗しました');
       }
     }
 
-    function tryParseShareFromUrl() {
-      const hash = window.location.hash || '';
-      if (!hash.startsWith('#preset=')) return false;
+    function buildSharePayload(optionalName) {
+      const projectName = document.getElementById('project-name').value || '';
+      return {
+        v: SHARE_VERSION,
+        name: optionalName || projectName || 'Shared Preset',
+        steps: cloneStepsForPreset(steps)
+      };
+    }
 
-      const encoded = hash.replace('#preset=', '').trim();
-      if (!encoded) return false;
+    function encodeSharePayload(payload) {
+      const json = JSON.stringify(payload);
+      if (window.LZString) {
+        return LZString.compressToEncodedURIComponent(json);
+      }
+      return encodeURIComponent(btoa(unescape(encodeURIComponent(json))));
+    }
+
+    function decodeShareToken(encoded) {
+      if (!encoded) throw new Error('empty preset token');
+      if (window.LZString) {
+        const json = LZString.decompressFromEncodedURIComponent(encoded);
+        if (!json) throw new Error('decompress failed');
+        return JSON.parse(json);
+      }
+      const decoded = decodeURIComponent(encoded);
+      return JSON.parse(decodeURIComponent(escape(atob(decoded))));
+    }
+
+    function tryParseShareFromUrl() {
+      const token = extractPresetToken(window.location.href);
+      if (!token) return false;
 
       try {
-        let json;
-        if (window.LZString) {
-          json = LZString.decompressFromEncodedURIComponent(encoded);
-        } else {
-          const decoded = decodeURIComponent(encoded);
-          json = decodeURIComponent(escape(atob(decoded)));
+        const payload = decodeShareToken(token);
+        const name = String(payload.name || 'Shared Preset');
+        const hasLocalWork = hasMeaningfulCurrentState();
+
+        if (hasLocalWork) {
+          const ok = confirm(`共有プロトコル「${name}」を開きますか？\n現在の編集中データは上書きされます。`);
+          if (!ok) return false;
         }
 
-        if (!json) throw new Error('decompress failed');
-        const payload = JSON.parse(json);
-        return applySharedPayload(payload, true);
+        applySharedPayload(payload, {
+          saveAsPreset: true,
+          saveCurrent: true,
+          importedFromUrl: true,
+          forcePresetName: null
+        });
+        return true;
       } catch (e) {
         console.error(e);
         showToast('共有リンクの読み込みに失敗しました');
@@ -806,35 +896,109 @@
       }
     }
 
-    function applySharedPayload(payload, saveAsPreset) {
-      if (!payload || typeof payload !== 'object') return false;
-      if (!Array.isArray(payload.steps)) return false;
+    function hasMeaningfulCurrentState() {
+      const projectName = (document.getElementById('project-name').value || '').trim();
+      if (projectName) return true;
+      if (steps.length === 0) return false;
+      if (steps.length > 1) return true;
+      const [only] = steps;
+      if (!only) return false;
+      return !(
+        (parseInt(only.day, 10) || 0) === 0 &&
+        String(only.title || '') === '開始 (Start)' &&
+        String(only.desc || '') === '実験開始'
+      );
+    }
 
-      steps = payload.steps
+    function applySharedPayload(payload, options = {}) {
+      const {
+        saveAsPreset = false,
+        saveCurrent = true,
+        importedFromUrl = false,
+        forcePresetName = null
+      } = options;
+
+      if (!payload || typeof payload !== 'object' || !Array.isArray(payload.steps)) {
+        throw new Error('invalid payload');
+      }
+
+      const nextSteps = payload.steps
         .filter(s => s && (typeof s.day === 'number' || typeof s.day === 'string'))
         .map((s, idx) => ({
-          id: Date.now() + idx,
-          day: parseInt(s.day) || 0,
+          id: generateId(),
+          day: parseInt(s.day, 10) || 0,
           title: String(s.title || 'Task'),
           desc: String(s.desc || ''),
-          order: (typeof s.order === 'number') ? s.order : idx
+          order: typeof s.order === 'number' ? s.order : idx
         }));
 
-      normalizeOrdering();
-      renderSteps();
-      saveState();
+      if (nextSteps.length === 0) {
+        throw new Error('no valid steps');
+      }
 
+      steps = nextSteps;
+      normalizeOrdering();
+
+      const incomingName = String(forcePresetName || payload.name || 'Shared Preset').trim() || 'Shared Preset';
+      document.getElementById('project-name').value = incomingName;
+
+      let savedPresetName = null;
       if (saveAsPreset) {
-        const name = String(payload.name || 'Shared Preset');
-        customPresets[name] = JSON.parse(JSON.stringify(steps));
+        savedPresetName = getUniqueImportedPresetName(incomingName);
+        customPresets[savedPresetName] = cloneStepsForPreset(steps);
         persistCustomPresets();
-        currentCustomPresetName = name;
-        renderCustomPresets();
-        showToast(`共有プリセット「${name}」を読み込みました`);
+      }
+
+      setCurrentPresetState(savedPresetName, false);
+      renderSteps();
+      renderCustomPresets();
+      updateSchedule();
+
+      if (saveCurrent) saveState();
+
+      if (importedFromUrl) {
+        const shownName = savedPresetName || incomingName;
+        if (shownName !== incomingName) {
+          showToast(`共有プロトコルを読み込みました（保存名: ${shownName}）`);
+        } else {
+          showToast(`共有プロトコル「${shownName}」を読み込みました`);
+        }
+      } else if (savedPresetName) {
+        if (savedPresetName !== incomingName) {
+          showToast(`プリセットを読み込みました（保存名: ${savedPresetName}）`);
+        } else {
+          showToast(`プリセット「${savedPresetName}」を読み込みました`);
+        }
       } else {
         showToast('プリセットを読み込みました');
       }
+
       return true;
+    }
+
+    function getUniqueImportedPresetName(baseName) {
+      const cleanBase = String(baseName || 'Shared Preset').trim() || 'Shared Preset';
+      if (!customPresets[cleanBase]) return cleanBase;
+
+      let counter = 1;
+      let candidate = `${cleanBase} (imported)`;
+      while (customPresets[candidate]) {
+        counter += 1;
+        candidate = `${cleanBase} (imported ${counter})`;
+      }
+      return candidate;
+    }
+
+    function extractPresetToken(text) {
+      const raw = String(text || '').trim();
+      if (!raw) return null;
+      if (raw.startsWith('#preset=')) return raw.slice('#preset='.length).trim();
+      if (raw.startsWith('preset=')) return raw.slice('preset='.length).trim();
+
+      const hashMatch = raw.match(/#preset=([^\s&#]+)/);
+      if (hashMatch && hashMatch[1]) return hashMatch[1].trim();
+
+      return null;
     }
 
     function importFromTextarea() {
@@ -842,53 +1006,24 @@
       if (!text) return showToast('貼り付け内容が空です');
 
       try {
-        if (text.includes('#preset=')) {
-          const u = new URL(text);
-          const encoded = (u.hash || '').replace('#preset=', '').trim();
-          if (!encoded) throw new Error('no preset');
-
-          let json;
-          if (window.LZString) json = LZString.decompressFromEncodedURIComponent(encoded);
-          else {
-            const decoded = decodeURIComponent(encoded);
-            json = decodeURIComponent(escape(atob(decoded)));
-          }
-
-          const payload = JSON.parse(json);
-          const overrideName = (document.getElementById('import-name').value || '').trim();
-          if (overrideName) payload.name = overrideName;
-
-          applySharedPayload(payload, true);
-          return;
-        }
-
-        if (text.startsWith('preset=')) {
-          const encoded = text.replace('preset=', '').trim();
-
-          let json;
-          if (window.LZString) json = LZString.decompressFromEncodedURIComponent(encoded);
-          else {
-            const decoded = decodeURIComponent(encoded);
-            json = decodeURIComponent(escape(atob(decoded)));
-          }
-
-          const payload = JSON.parse(json);
-          const overrideName = (document.getElementById('import-name').value || '').trim();
-          if (overrideName) payload.name = overrideName;
-
-          applySharedPayload(payload, true);
-          return;
-        }
-
-        const payload = JSON.parse(text);
+        const payload = parseImportText(text);
         const overrideName = (document.getElementById('import-name').value || '').trim();
-        if (overrideName) payload.name = overrideName;
 
-        applySharedPayload(payload, true);
+        applySharedPayload(payload, {
+          saveAsPreset: true,
+          saveCurrent: true,
+          forcePresetName: overrideName || null
+        });
       } catch (e) {
         console.error(e);
         showToast('インポートに失敗しました（形式を確認してください）');
       }
+    }
+
+    function parseImportText(text) {
+      const token = extractPresetToken(text);
+      if (token) return decodeShareToken(token);
+      return JSON.parse(text);
     }
 
     function exportPresetJsonFile() {
@@ -896,12 +1031,7 @@
         const payload = buildSharePayload();
         const safe = sanitizeFilename(payload.name || 'preset');
         const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' });
-        const link = document.createElement('a');
-        link.href = window.URL.createObjectURL(blob);
-        link.setAttribute('download', `${safe}.labpreset.json`);
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+        downloadBlob(blob, `${safe}.labpreset.json`);
         showToast('JSONファイルを保存しました');
       } catch (e) {
         console.error(e);
@@ -918,19 +1048,51 @@
         try {
           const payload = JSON.parse(String(reader.result || ''));
           const overrideName = (document.getElementById('import-name').value || '').trim();
-          if (overrideName) payload.name = overrideName;
-          applySharedPayload(payload, true);
+          applySharedPayload(payload, {
+            saveAsPreset: true,
+            saveCurrent: true,
+            forcePresetName: overrideName || null
+          });
         } catch (e) {
           console.error(e);
           showToast('JSON読込に失敗しました');
+        } finally {
+          event.target.value = '';
         }
       };
       reader.readAsText(file);
     }
 
-    // =========================
-    // Utils
-    // =========================
+    function downloadBlob(blob, filename) {
+      const link = document.createElement('a');
+      const objectUrl = window.URL.createObjectURL(blob);
+      link.href = objectUrl;
+      link.setAttribute('download', filename);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => window.URL.revokeObjectURL(objectUrl), 1000);
+    }
+
+    async function copyTextToClipboard(text) {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+        return;
+      }
+
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.setAttribute('readonly', '');
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(textarea);
+      if (!ok) throw new Error('clipboard copy failed');
+    }
+
     function sanitizeFilename(name) {
       return String(name).replace(/[^a-zA-Z0-9_-]+/g, '_').slice(0, 80) || 'preset';
     }
@@ -947,10 +1109,33 @@
     function escapeIcsText(str) {
       return String(str ?? '')
         .replace(/\\/g, '\\\\')
+        .replace(/\r\n/g, '\n')
         .replace(/\n/g, '\\n')
         .replace(/\r/g, '')
         .replace(/;/g, '\\;')
         .replace(/,/g, '\\,');
+    }
+
+    function foldIcsLine(line, maxBytes = 73) {
+      const encoder = new TextEncoder();
+      const chars = Array.from(String(line));
+      const lines = [];
+      let current = '';
+      let currentLimit = maxBytes;
+
+      for (const ch of chars) {
+        const next = current + ch;
+        if (encoder.encode(next).length > currentLimit && current !== '') {
+          lines.push(current);
+          current = ` ${ch}`;
+          currentLimit = maxBytes;
+        } else {
+          current = next;
+        }
+      }
+
+      if (current) lines.push(current);
+      return lines;
     }
   </script>
 </body>

@@ -47,6 +47,154 @@
 <body class="bg-slate-50 min-h-screen text-slate-800 font-sans">
   <div id="toast"></div>
 
+  <!-- How To Use モーダル -->
+  <div id="howto-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-900/60 p-4" onclick="handleHowToBackdrop(event)">
+    <div class="relative flex w-full max-w-2xl flex-col rounded-2xl bg-white shadow-2xl" style="max-height:90vh;" onclick="event.stopPropagation()">
+
+      <!-- ヘッダー -->
+      <div class="flex flex-shrink-0 items-center justify-between border-b border-slate-200 px-6 py-4">
+        <h2 class="flex items-center gap-2 text-xl font-bold text-indigo-700">
+          <i data-lucide="book-open" class="w-5 h-5"></i>
+          使い方ガイド
+        </h2>
+        <button onclick="closeHowTo()" class="rounded-xl p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <!-- スクロールコンテンツ -->
+      <div class="flex-1 space-y-7 overflow-y-auto px-6 py-5">
+
+        <!-- 概要 -->
+        <p class="rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm leading-relaxed text-indigo-800">
+          培養・実験プロトコルを <strong>Day N 形式</strong> で登録すると、開始日から絶対日付を自動計算します。Outlook に一括登録できる <strong>ICS ファイル</strong> や、プレゼン用の <strong>スライド画像</strong> をワンクリックで出力できます。サーバー不要・ブラウザだけで動作します。
+        </p>
+
+        <!-- 基本の流れ -->
+        <section>
+          <h3 class="mb-4 flex items-center gap-2 text-base font-bold text-slate-800">
+            <i data-lucide="arrow-right-circle" class="w-4 h-4 text-indigo-600"></i>
+            基本の流れ
+          </h3>
+          <ol class="space-y-4">
+            <li class="flex gap-3">
+              <span class="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-indigo-600 text-xs font-bold text-white">1</span>
+              <div>
+                <div class="font-semibold text-slate-800">開始日とプロトコル名を入力</div>
+                <div class="mt-0.5 text-sm text-slate-500">左パネル「基本設定」で <strong>Day 0 の日付</strong> とプロトコル名を入力します。作成者名・参照 SOP も任意で記入できます。</div>
+              </div>
+            </li>
+            <li class="flex gap-3">
+              <span class="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-indigo-600 text-xs font-bold text-white">2</span>
+              <div>
+                <div class="font-semibold text-slate-800">ステップを追加・編集</div>
+                <div class="mt-0.5 text-sm text-slate-500">「ステップ追加」ボタンで行を追加し、<strong>Day 番号</strong>・<strong>タスク名</strong>・<strong>メモ（試薬など）</strong> を入力します。入力欄下の候補チップをクリックするとタスク名をすばやく入力できます。</div>
+              </div>
+            </li>
+            <li class="flex gap-3">
+              <span class="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-indigo-600 text-xs font-bold text-white">3</span>
+              <div>
+                <div class="font-semibold text-slate-800">プレビューで絶対日付を確認</div>
+                <div class="mt-0.5 text-sm text-slate-500">右側「Outlook 登録前プレビュー」に各ステップの実施日が自動表示されます。<span class="font-semibold text-orange-600">土日はオレンジ</span> で強調されます。</div>
+              </div>
+            </li>
+            <li class="flex gap-3">
+              <span class="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-indigo-600 text-xs font-bold text-white">4</span>
+              <div>
+                <div class="font-semibold text-slate-800">ICS を書き出して Outlook に登録</div>
+                <div class="mt-0.5 text-sm text-slate-500">ヘッダーの「ICSを書き出す」を押すと <code class="rounded bg-slate-100 px-1 py-0.5 text-xs">.ics</code> ファイルが保存されます。ダブルクリックするか Outlook にドラッグ&ドロップで一括登録されます。</div>
+              </div>
+            </li>
+            <li class="flex gap-3">
+              <span class="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-indigo-600 text-xs font-bold text-white">5</span>
+              <div>
+                <div class="font-semibold text-slate-800">スライド用画像を保存（任意）</div>
+                <div class="mt-0.5 text-sm text-slate-500">ページ下部の「スライド用タイムライン」「カレンダー表示」から <strong>SVG</strong> または <strong>PNG</strong> でダウンロードしてスライドに貼り付けられます。</div>
+              </div>
+            </li>
+          </ol>
+        </section>
+
+        <!-- ステップ編集のコツ -->
+        <section>
+          <h3 class="mb-3 flex items-center gap-2 text-base font-bold text-slate-800">
+            <i data-lucide="pencil" class="w-4 h-4 text-indigo-600"></i>
+            ステップ編集のコツ
+          </h3>
+          <ul class="space-y-2 text-sm text-slate-600">
+            <li class="flex gap-2"><span class="font-bold text-indigo-400">•</span><span><strong>同じ Day に複数タスク</strong> を登録できます。各行に同じ Day 番号を入力してください。</span></li>
+            <li class="flex gap-2"><span class="font-bold text-indigo-400">•</span><span>各行左端の <strong>ハンドルをドラッグ</strong> すると、同一 Day 内の順序を変更できます。Day をまたいで移動することもできます。</span></li>
+            <li class="flex gap-2"><span class="font-bold text-indigo-400">•</span><span>行右端の <strong>コピーアイコン</strong> で同じ内容のステップをすばやく複製できます。</span></li>
+            <li class="flex gap-2"><span class="font-bold text-indigo-400">•</span><span>候補チップは <strong>過去に入力したタスク名</strong> や保存済みプロトコルのタスクも学習します。</span></li>
+          </ul>
+        </section>
+
+        <!-- スライド用エクスポート -->
+        <section>
+          <h3 class="mb-3 flex items-center gap-2 text-base font-bold text-slate-800">
+            <i data-lucide="gantt-chart" class="w-4 h-4 text-indigo-600"></i>
+            スライド用エクスポート
+          </h3>
+          <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
+            <div class="rounded-xl border border-indigo-100 bg-indigo-50 p-4">
+              <div class="mb-1 font-semibold text-indigo-800">タイムライン（横矢印）</div>
+              <ul class="space-y-1 text-xs text-indigo-700">
+                <li>→ ステップを横矢印の●でプロット</li>
+                <li>→ <strong>等間隔</strong>：コンパクトで見やすい（デフォルト）</li>
+                <li>→ <strong>日数比例</strong>：実際の間隔を視覚的に表現</li>
+              </ul>
+            </div>
+            <div class="rounded-xl border border-emerald-100 bg-emerald-50 p-4">
+              <div class="mb-1 font-semibold text-emerald-800">カレンダー（7列）</div>
+              <ul class="space-y-1 text-xs text-emerald-700">
+                <li>→ 月〜日の7列・月曜始まり</li>
+                <li>→ タスクあり日をインジゴでハイライト</li>
+                <li>→ 土曜：薄青 / 日曜：薄赤で色分け</li>
+              </ul>
+            </div>
+          </div>
+          <p class="mt-2 text-xs text-slate-500"><strong>SVG</strong>（ベクター形式・PowerPoint / Keynote / Illustrator で編集可）と <strong>PNG</strong>（高解像度 2x）の両方で保存できます。</p>
+        </section>
+
+        <!-- 保存・共有 -->
+        <section>
+          <h3 class="mb-3 flex items-center gap-2 text-base font-bold text-slate-800">
+            <i data-lucide="share-2" class="w-4 h-4 text-indigo-600"></i>
+            保存・共有・バックアップ
+          </h3>
+          <ul class="space-y-2 text-sm text-slate-600">
+            <li class="flex gap-2"><span class="font-bold text-indigo-400">•</span><span><strong>現在の内容を保存</strong>：名前をつけてブラウザ（localStorage）に保存します。「保存済みプロトコル」欄に一覧表示されます。</span></li>
+            <li class="flex gap-2"><span class="font-bold text-indigo-400">•</span><span><strong>共有リンク</strong>：スケジュールを URL に圧縮して埋め込みます。リンクを送るだけでチームと共有できます。</span></li>
+            <li class="flex gap-2"><span class="font-bold text-indigo-400">•</span><span><strong>JSON保存 / 読込</strong>：ファイルとして長期保管できるバックアップ形式です。「保存済み一括バックアップ」で全プロトコルをまとめてエクスポートできます。</span></li>
+          </ul>
+        </section>
+
+        <!-- FAQ -->
+        <section class="pb-2">
+          <h3 class="mb-3 flex items-center gap-2 text-base font-bold text-slate-800">
+            <i data-lucide="help-circle" class="w-4 h-4 text-indigo-600"></i>
+            よくある質問
+          </h3>
+          <div class="space-y-3">
+            <div class="rounded-xl border border-slate-200 p-3">
+              <div class="text-sm font-semibold text-slate-800">データが消えてしまわないか？</div>
+              <div class="mt-1 text-xs text-slate-500">入力内容は自動的にブラウザの localStorage に保存されます。ただし、サイトデータの全消去・シークレットウィンドウ使用時はリセットされます。定期的に「保存済みプロトコル」へ保存するか、JSON バックアップをお勧めします。</div>
+            </div>
+            <div class="rounded-xl border border-slate-200 p-3">
+              <div class="text-sm font-semibold text-slate-800">Outlook 以外のカレンダーでも使える？</div>
+              <div class="mt-1 text-xs text-slate-500">ICS 形式は Google カレンダー・Apple カレンダー・Thunderbird など主要なカレンダーアプリに対応しています。</div>
+            </div>
+            <div class="rounded-xl border border-slate-200 p-3">
+              <div class="text-sm font-semibold text-slate-800">インターネット接続がなくても使える？</div>
+              <div class="mt-1 text-xs text-slate-500">初回アクセス時のみ CDN からライブラリを読み込みます。HTML ファイルをローカルに保存して開く場合は、ブラウザキャッシュがあればオフラインでも動作します。</div>
+            </div>
+          </div>
+        </section>
+
+      </div>
+    </div>
+  </div>
+
   <div class="max-w-7xl mx-auto px-4 py-6 md:px-8 md:py-8">
     <header class="mb-6 no-print flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
       <div>
@@ -58,6 +206,10 @@
       </div>
 
       <div class="flex flex-wrap gap-2">
+        <button onclick="openHowTo()" class="inline-flex items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-100 transition">
+          <i data-lucide="help-circle" class="w-4 h-4"></i>
+          使い方
+        </button>
         <button onclick="window.print()" class="no-print inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 transition">
           <i data-lucide="printer" class="w-4 h-4"></i>
           印刷
@@ -333,7 +485,25 @@
       bindBasicInputEvents();
       tryParseShareFromUrl();
       lucide.createIcons();
+      document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeHowTo(); });
     };
+
+    function openHowTo() {
+      const modal = document.getElementById('howto-modal');
+      modal.classList.remove('hidden');
+      modal.classList.add('flex');
+      lucide.createIcons();
+    }
+
+    function closeHowTo() {
+      const modal = document.getElementById('howto-modal');
+      modal.classList.add('hidden');
+      modal.classList.remove('flex');
+    }
+
+    function handleHowToBackdrop(e) {
+      if (e.target === document.getElementById('howto-modal')) closeHowTo();
+    }
 
     function bindBasicInputEvents() {
       const simpleSaveIds = ['project-name', 'start-date', 'creator-name', 'reference-sop'];

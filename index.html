@@ -225,6 +225,56 @@
           <div id="project-title-display" class="hidden print-only text-2xl font-bold border-b border-slate-300 pb-3 mb-4"></div>
           <div id="schedule-display" class="space-y-4"></div>
         </section>
+
+        <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm no-print">
+          <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
+            <div>
+              <h2 class="text-lg font-semibold flex items-center gap-2">
+                <i data-lucide="gantt-chart" class="w-5 h-5"></i>
+                スライド用タイムライン
+              </h2>
+              <p class="text-xs text-slate-500 mt-1">横矢印形式でスライド向けのタイムラインを表示・SVG/PNG でダウンロードできます。</p>
+            </div>
+            <div class="flex items-center gap-2 flex-wrap">
+              <div class="flex rounded-xl border border-slate-200 overflow-hidden text-xs">
+                <button id="mode-btn-equal" onclick="setSlideMode('equal')" class="px-3 py-1.5 font-semibold bg-indigo-600 text-white transition">等間隔</button>
+                <button id="mode-btn-proportional" onclick="setSlideMode('proportional')" class="px-3 py-1.5 font-semibold bg-white text-slate-600 hover:bg-slate-100 transition">日数比例</button>
+              </div>
+              <button onclick="downloadSlideAsSvg()" class="inline-flex items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-100 transition">
+                <i data-lucide="download" class="w-4 h-4"></i>
+                SVG保存
+              </button>
+              <button onclick="downloadSlideAsPng()" class="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-bold text-white hover:bg-indigo-700 transition shadow-sm">
+                <i data-lucide="image" class="w-4 h-4"></i>
+                PNG保存
+              </button>
+            </div>
+          </div>
+          <div id="slide-timeline-svg" class="w-full overflow-x-auto rounded-xl border border-slate-200 bg-white min-h-[80px]"></div>
+        </section>
+
+        <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm no-print">
+          <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
+            <div>
+              <h2 class="text-lg font-semibold flex items-center gap-2">
+                <i data-lucide="calendar-days" class="w-5 h-5"></i>
+                カレンダー表示
+              </h2>
+              <p class="text-xs text-slate-500 mt-1">月〜日の7列カレンダー形式でスケジュールを表示・ダウンロードできます。</p>
+            </div>
+            <div class="flex items-center gap-2 flex-wrap">
+              <button onclick="downloadCalendarAsSvg()" class="inline-flex items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-100 transition">
+                <i data-lucide="download" class="w-4 h-4"></i>
+                SVG保存
+              </button>
+              <button onclick="downloadCalendarAsPng()" class="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-bold text-white hover:bg-indigo-700 transition shadow-sm">
+                <i data-lucide="image" class="w-4 h-4"></i>
+                PNG保存
+              </button>
+            </div>
+          </div>
+          <div id="slide-calendar-svg" class="w-full overflow-x-auto rounded-xl border border-slate-200 bg-white min-h-[80px]"></div>
+        </section>
       </main>
     </div>
   </div>
@@ -276,6 +326,7 @@
     let currentUpdatedAt = null;
     let lastAutoSavedAt = null;
     let daySortables = [];
+    let slideTimelineMode = 'equal';
 
     window.onload = () => {
       loadAllFromStorage();
@@ -1038,6 +1089,8 @@
     }
 
     function updateSchedule() {
+      renderSlideTimeline();
+      renderCalendarTimeline();
       const display = document.getElementById('schedule-display');
       const titleDisplay = document.getElementById('project-title-display');
       const summary = document.getElementById('preview-summary');
@@ -1470,6 +1523,360 @@
       localStorage.removeItem(STORAGE_KEYS.current);
       localStorage.removeItem(STORAGE_KEYS.presets);
       location.reload();
+    }
+
+    function getMondayOfWeek(date) {
+      const day = date.getDay();
+      const diff = day === 0 ? -6 : 1 - day;
+      return new Date(date.getFullYear(), date.getMonth(), date.getDate() + diff);
+    }
+
+    function getSundayOfWeek(date) {
+      const day = date.getDay();
+      const diff = day === 0 ? 0 : 7 - day;
+      return new Date(date.getFullYear(), date.getMonth(), date.getDate() + diff);
+    }
+
+    function renderCalendarTimeline() {
+      const container = document.getElementById('slide-calendar-svg');
+      if (!container) return;
+
+      const projectName = (document.getElementById('project-name').value || '').trim() || 'Untitled Protocol';
+      const startDateVal = document.getElementById('start-date').value;
+      const creatorName = (document.getElementById('creator-name').value || '').trim();
+      const referenceSop = (document.getElementById('reference-sop').value || '').trim();
+      const sortedSteps = getSortedSteps();
+      const baseDate = startDateVal ? parseLocalDateInput(startDateVal) : null;
+
+      if (!baseDate || sortedSteps.length === 0) {
+        const msg = !baseDate ? '開始日を設定するとカレンダーが表示されます' : 'ステップを追加するとカレンダーが表示されます';
+        container.innerHTML = `<div class="p-8 text-center text-slate-400 text-sm">${msg}</div>`;
+        return;
+      }
+
+      const dateStepMap = new Map();
+      sortedSteps.forEach((step) => {
+        const d = addDaysLocal(baseDate, Number(step.day) || 0);
+        const key = formatInputDate(d);
+        if (!dateStepMap.has(key)) dateStepMap.set(key, []);
+        dateStepMap.get(key).push(step);
+      });
+
+      const minDay = Math.min(...sortedSteps.map((s) => Number(s.day) || 0));
+      const maxDay = Math.max(...sortedSteps.map((s) => Number(s.day) || 0));
+      const firstStepDate = addDaysLocal(baseDate, minDay);
+      const lastStepDate = addDaysLocal(baseDate, maxDay);
+
+      const calStart = getMondayOfWeek(firstStepDate);
+      const calEnd = getSundayOfWeek(lastStepDate);
+
+      const weeks = [];
+      let cur = new Date(calStart.getFullYear(), calStart.getMonth(), calStart.getDate());
+      while (cur <= calEnd) {
+        const week = [];
+        for (let i = 0; i < 7; i++) {
+          week.push(new Date(cur.getFullYear(), cur.getMonth(), cur.getDate()));
+          cur = new Date(cur.getFullYear(), cur.getMonth(), cur.getDate() + 1);
+        }
+        weeks.push(week);
+      }
+
+      const W = 1260;
+      const cellW = W / 7;
+      const HEADER_H = 76;
+      const DAY_HEADER_H = 36;
+      const maxTasksPerDay = Math.max(1, ...Array.from(dateStepMap.values()).map((v) => v.length));
+      const CELL_H = Math.max(88, 48 + maxTasksPerDay * 32);
+      const gridTop = HEADER_H + DAY_HEADER_H;
+      const gridH = weeks.length * CELL_H;
+      const H = gridTop + gridH + 4;
+
+      const p = [];
+      p.push(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" style="font-family: -apple-system, 'Helvetica Neue', Arial, 'Hiragino Kaku Gothic ProN', 'Yu Gothic', Meiryo, sans-serif;">`);
+      p.push(`<rect width="${W}" height="${H}" fill="#ffffff"/>`);
+
+      p.push(`<text x="${W / 2}" y="34" text-anchor="middle" font-size="20" font-weight="700" fill="#3730a3">${escapeHtml(projectName)}</text>`);
+      const subtitleParts = [];
+      if (startDateVal) subtitleParts.push(`開始日: ${startDateVal}`);
+      if (creatorName) subtitleParts.push(`作成者: ${creatorName}`);
+      if (referenceSop) subtitleParts.push(`参照SOP: ${referenceSop}`);
+      if (subtitleParts.length) {
+        p.push(`<text x="${W / 2}" y="56" text-anchor="middle" font-size="12" fill="#64748b">${escapeHtml(subtitleParts.join('  ·  '))}</text>`);
+      }
+
+      p.push(`<rect x="0" y="${HEADER_H}" width="${W}" height="${DAY_HEADER_H}" fill="#f1f5f9"/>`);
+      p.push(`<rect x="0" y="${gridTop}" width="${W}" height="${gridH}" fill="#ffffff"/>`);
+
+      // 土日列の淡い色
+      p.push(`<rect x="${5 * cellW}" y="${gridTop}" width="${cellW}" height="${gridH}" fill="#eff6ff"/>`);
+      p.push(`<rect x="${6 * cellW}" y="${gridTop}" width="${cellW}" height="${gridH}" fill="#fff5f5"/>`);
+
+      // セル内容（背景・アクセントバー・テキスト）
+      weeks.forEach((week, wIdx) => {
+        const rowY = gridTop + wIdx * CELL_H;
+        week.forEach((date, dIdx) => {
+          const cellX = dIdx * cellW;
+          const dateKey = formatInputDate(date);
+          const stepsForDay = dateStepMap.get(dateKey) || [];
+          const hasSteps = stepsForDay.length > 0;
+          const isInProtocol = date >= firstStepDate && date <= lastStepDate;
+
+          if (hasSteps) {
+            p.push(`<rect x="${cellX}" y="${rowY}" width="${cellW}" height="${CELL_H}" fill="#eef2ff"/>`);
+            p.push(`<rect x="${cellX}" y="${rowY}" width="4" height="${CELL_H}" fill="#6366f1"/>`);
+          } else if (!isInProtocol && dIdx < 5) {
+            p.push(`<rect x="${cellX}" y="${rowY}" width="${cellW}" height="${CELL_H}" fill="#f8fafc"/>`);
+          }
+
+          // 日付数字（右上）
+          const dateNum = date.getDate();
+          const isFirstOfMonth = dateNum === 1;
+          const dateLabel = isFirstOfMonth ? `${date.getMonth() + 1}/${dateNum}` : `${dateNum}`;
+          const dateColor = hasSteps ? '#4338ca' : (dIdx === 6 ? '#dc2626' : dIdx === 5 ? '#2563eb' : '#94a3b8');
+          const dateFW = hasSteps || isFirstOfMonth ? '700' : '400';
+          p.push(`<text x="${cellX + cellW - 6}" y="${rowY + 17}" text-anchor="end" font-size="12" font-weight="${dateFW}" fill="${dateColor}">${dateLabel}</text>`);
+
+          // タスク一覧
+          stepsForDay.forEach((step, sIdx) => {
+            const taskY = rowY + 30 + sIdx * 32;
+            const maxChars = Math.max(4, Math.floor((cellW - 12) / 8.5));
+            const titleStr = step.title.length > maxChars ? step.title.slice(0, maxChars - 1) + '…' : step.title;
+            p.push(`<text x="${cellX + 8}" y="${taskY}" font-size="11.5" font-weight="700" fill="#3730a3">${escapeHtml(titleStr)}</text>`);
+            if (step.desc && CELL_H >= 102) {
+              const dMax = Math.max(5, Math.floor((cellW - 12) / 7));
+              const descStr = step.desc.length > dMax ? step.desc.slice(0, dMax - 1) + '…' : step.desc;
+              p.push(`<text x="${cellX + 8}" y="${taskY + 13}" font-size="9.5" fill="#6366f1">${escapeHtml(descStr)}</text>`);
+            }
+          });
+        });
+      });
+
+      // グリッド線
+      for (let row = 0; row <= weeks.length; row++) {
+        p.push(`<line x1="0" y1="${gridTop + row * CELL_H}" x2="${W}" y2="${gridTop + row * CELL_H}" stroke="#e2e8f0" stroke-width="1"/>`);
+      }
+      for (let col = 0; col <= 7; col++) {
+        p.push(`<line x1="${col * cellW}" y1="${HEADER_H}" x2="${col * cellW}" y2="${gridTop + gridH}" stroke="#e2e8f0" stroke-width="1"/>`);
+      }
+
+      // 外枠
+      p.push(`<rect x="0.5" y="${gridTop + 0.5}" width="${W - 1}" height="${gridH - 1}" fill="none" stroke="#94a3b8" stroke-width="1.5"/>`);
+      p.push(`<rect x="0.5" y="${HEADER_H + 0.5}" width="${W - 1}" height="${DAY_HEADER_H - 1}" fill="none" stroke="#94a3b8" stroke-width="1.5"/>`);
+
+      // 曜日ヘッダーテキスト（最前面）
+      ['月', '火', '水', '木', '金', '土', '日'].forEach((name, i) => {
+        const cx = i * cellW + cellW / 2;
+        const tc = i === 6 ? '#dc2626' : i === 5 ? '#2563eb' : '#374151';
+        p.push(`<text x="${cx}" y="${HEADER_H + DAY_HEADER_H - 10}" text-anchor="middle" font-size="14" font-weight="700" fill="${tc}">${name}</text>`);
+      });
+
+      p.push('</svg>');
+      container.innerHTML = p.join('\n');
+    }
+
+    function downloadCalendarAsSvg() {
+      const svgEl = document.querySelector('#slide-calendar-svg svg');
+      if (!svgEl) return showToast('カレンダーを先に表示してください');
+      const projectName = sanitizeFilename(document.getElementById('project-name').value || 'schedule');
+      const svgData = new XMLSerializer().serializeToString(svgEl);
+      const blob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+      downloadBlob(blob, `${projectName}_calendar.svg`);
+      showToast('SVGファイルを保存しました');
+    }
+
+    function downloadCalendarAsPng() {
+      const svgEl = document.querySelector('#slide-calendar-svg svg');
+      if (!svgEl) return showToast('カレンダーを先に表示してください');
+      const W = parseInt(svgEl.getAttribute('width'), 10);
+      const H = parseInt(svgEl.getAttribute('height'), 10);
+      const scale = 2;
+      const canvas = document.createElement('canvas');
+      canvas.width = W * scale;
+      canvas.height = H * scale;
+      const ctx = canvas.getContext('2d');
+      ctx.scale(scale, scale);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, W, H);
+      const svgData = new XMLSerializer().serializeToString(svgEl);
+      const blob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const img = new Image();
+      img.onload = () => {
+        ctx.drawImage(img, 0, 0, W, H);
+        URL.revokeObjectURL(url);
+        canvas.toBlob((pngBlob) => {
+          const projectName = sanitizeFilename(document.getElementById('project-name').value || 'schedule');
+          downloadBlob(pngBlob, `${projectName}_calendar.png`);
+          showToast('PNGファイルを保存しました');
+        }, 'image/png');
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        showToast('PNG変換に失敗しました。SVG保存をお試しください。');
+      };
+      img.src = url;
+    }
+
+    function setSlideMode(mode) {
+      slideTimelineMode = mode;
+      const activeClass = 'px-3 py-1.5 font-semibold bg-indigo-600 text-white transition';
+      const inactiveClass = 'px-3 py-1.5 font-semibold bg-white text-slate-600 hover:bg-slate-100 transition';
+      document.getElementById('mode-btn-equal').className = mode === 'equal' ? activeClass : inactiveClass;
+      document.getElementById('mode-btn-proportional').className = mode === 'proportional' ? activeClass : inactiveClass;
+      renderSlideTimeline();
+    }
+
+    function renderSlideTimeline() {
+      const container = document.getElementById('slide-timeline-svg');
+      if (!container) return;
+
+      const projectName = (document.getElementById('project-name').value || '').trim() || 'Untitled Protocol';
+      const startDateVal = document.getElementById('start-date').value;
+      const creatorName = (document.getElementById('creator-name').value || '').trim();
+      const referenceSop = (document.getElementById('reference-sop').value || '').trim();
+      const sortedSteps = getSortedSteps();
+
+      const W = 1280;
+      const ML = 90, MR = 60;
+      const availW = W - ML - MR;
+
+      const dayMap = new Map();
+      sortedSteps.forEach((step) => {
+        const d = Number(step.day) || 0;
+        if (!dayMap.has(d)) dayMap.set(d, []);
+        dayMap.get(d).push(step);
+      });
+      const uniqueDays = Array.from(dayMap.keys()).sort((a, b) => a - b);
+      const n = uniqueDays.length;
+
+      if (n === 0) {
+        container.innerHTML = '<div class="p-8 text-center text-slate-400 text-sm">ステップを追加するとタイムラインが表示されます</div>';
+        return;
+      }
+
+      const MAX_STEP_GAP = 150;
+      const totalW_equal = n > 1 ? Math.min(availW, (n - 1) * MAX_STEP_GAP) : 0;
+      const offsetX_equal = ML + (availW - totalW_equal) / 2;
+
+      function dayToX(day) {
+        if (slideTimelineMode === 'proportional') {
+          const minDay = uniqueDays[0];
+          const maxDay = uniqueDays[uniqueDays.length - 1];
+          const range = maxDay - minDay || 1;
+          return ML + ((day - minDay) / range) * availW;
+        }
+        const idx = uniqueDays.indexOf(day);
+        if (n === 1) return W / 2;
+        return offsetX_equal + (idx / (n - 1)) * totalW_equal;
+      }
+
+      const maxTasksPerDay = Math.max(...Array.from(dayMap.values()).map((v) => v.length));
+      const axisY = 165;
+      const H = axisY + 45 + maxTasksPerDay * 42 + 20;
+      const baseDate = startDateVal ? parseLocalDateInput(startDateVal) : null;
+      const actualGap = n > 1 ? totalW_equal / (n - 1) : (totalW_equal || availW);
+      const maxTitleChars = Math.max(6, Math.floor(actualGap / 13));
+      const maxDescChars = Math.max(8, Math.floor(actualGap / 10));
+
+      const parts = [];
+      parts.push(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" style="font-family: -apple-system, 'Helvetica Neue', Arial, 'Hiragino Kaku Gothic ProN', 'Yu Gothic', Meiryo, sans-serif;">`);
+      parts.push(`<rect width="${W}" height="${H}" fill="#ffffff"/>`);
+
+      parts.push(`<text x="${W / 2}" y="38" text-anchor="middle" font-size="20" font-weight="700" fill="#3730a3">${escapeHtml(projectName)}</text>`);
+
+      const subtitleParts = [];
+      if (startDateVal) subtitleParts.push(`開始日: ${startDateVal}`);
+      if (creatorName) subtitleParts.push(`作成者: ${creatorName}`);
+      if (referenceSop) subtitleParts.push(`参照SOP: ${referenceSop}`);
+      if (subtitleParts.length) {
+        parts.push(`<text x="${W / 2}" y="60" text-anchor="middle" font-size="12" fill="#64748b">${escapeHtml(subtitleParts.join('  ·  '))}</text>`);
+      }
+
+      parts.push(`<line x1="40" y1="74" x2="${W - 40}" y2="74" stroke="#e2e8f0" stroke-width="1"/>`);
+
+      const firstX = dayToX(uniqueDays[0]);
+      const lastX = dayToX(uniqueDays[uniqueDays.length - 1]);
+      const arrowTip = lastX + 55;
+      parts.push(`<line x1="${firstX - 30}" y1="${axisY}" x2="${arrowTip - 14}" y2="${axisY}" stroke="#94a3b8" stroke-width="3" stroke-linecap="round"/>`);
+      parts.push(`<polygon points="${arrowTip},${axisY} ${arrowTip - 16},${axisY - 8} ${arrowTip - 16},${axisY + 8}" fill="#94a3b8"/>`);
+
+      uniqueDays.forEach((day) => {
+        const x = dayToX(day);
+        const stepsOnDay = dayMap.get(day);
+        let dateStr = '';
+        let isWeekend = false;
+        if (baseDate) {
+          const targetDate = addDaysLocal(baseDate, day);
+          isWeekend = targetDate.getDay() === 0 || targetDate.getDay() === 6;
+          dateStr = `${targetDate.getMonth() + 1}/${targetDate.getDate()}`;
+        }
+
+        const accentColor = '#6366f1';
+        const dateColor = isWeekend ? '#ea580c' : '#64748b';
+
+        parts.push(`<line x1="${x}" y1="${axisY - 14}" x2="${x}" y2="${axisY + 14}" stroke="${accentColor}" stroke-width="2.5"/>`);
+        parts.push(`<circle cx="${x}" cy="${axisY}" r="8" fill="${accentColor}" stroke="#ffffff" stroke-width="2.5"/>`);
+        parts.push(`<text x="${x}" y="${axisY - 24}" text-anchor="middle" font-size="12" font-weight="700" fill="${accentColor}">Day ${day}</text>`);
+        if (dateStr) {
+          parts.push(`<text x="${x}" y="${axisY - 41}" text-anchor="middle" font-size="11" fill="${dateColor}">${escapeHtml(dateStr)}</text>`);
+        }
+
+        stepsOnDay.forEach((step, sIdx) => {
+          const yBase = axisY + 32 + sIdx * 42;
+          const titleStr = step.title.length > maxTitleChars ? step.title.slice(0, maxTitleChars - 1) + '…' : step.title;
+          parts.push(`<text x="${x}" y="${yBase}" text-anchor="middle" font-size="13" font-weight="700" fill="#1e1b4b">${escapeHtml(titleStr)}</text>`);
+          if (step.desc) {
+            const descStr = step.desc.length > maxDescChars ? step.desc.slice(0, maxDescChars - 1) + '…' : step.desc;
+            parts.push(`<text x="${x}" y="${yBase + 16}" text-anchor="middle" font-size="10.5" fill="#64748b">${escapeHtml(descStr)}</text>`);
+          }
+        });
+      });
+
+      parts.push('</svg>');
+      container.innerHTML = parts.join('\n');
+    }
+
+    function downloadSlideAsSvg() {
+      const svgEl = document.querySelector('#slide-timeline-svg svg');
+      if (!svgEl) return showToast('タイムラインを先に表示してください');
+      const projectName = sanitizeFilename(document.getElementById('project-name').value || 'schedule');
+      const svgData = new XMLSerializer().serializeToString(svgEl);
+      const blob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+      downloadBlob(blob, `${projectName}_timeline.svg`);
+      showToast('SVGファイルを保存しました');
+    }
+
+    function downloadSlideAsPng() {
+      const svgEl = document.querySelector('#slide-timeline-svg svg');
+      if (!svgEl) return showToast('タイムラインを先に表示してください');
+      const W = parseInt(svgEl.getAttribute('width'), 10);
+      const H = parseInt(svgEl.getAttribute('height'), 10);
+      const scale = 2;
+      const canvas = document.createElement('canvas');
+      canvas.width = W * scale;
+      canvas.height = H * scale;
+      const ctx = canvas.getContext('2d');
+      ctx.scale(scale, scale);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, W, H);
+      const svgData = new XMLSerializer().serializeToString(svgEl);
+      const blob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const img = new Image();
+      img.onload = () => {
+        ctx.drawImage(img, 0, 0, W, H);
+        URL.revokeObjectURL(url);
+        canvas.toBlob((pngBlob) => {
+          const projectName = sanitizeFilename(document.getElementById('project-name').value || 'schedule');
+          downloadBlob(pngBlob, `${projectName}_timeline.png`);
+          showToast('PNGファイルを保存しました');
+        }, 'image/png');
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        showToast('PNG変換に失敗しました。SVG保存をお試しください。');
+      };
+      img.src = url;
     }
 
     function escapeJsString(str) {

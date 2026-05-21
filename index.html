@@ -42,6 +42,28 @@
     }
     @keyframes fadein { from { bottom: 8px; opacity: 0; } to { bottom: 24px; opacity: 1; } }
     @keyframes fadeout { from { bottom: 24px; opacity: 1; } to { bottom: 8px; opacity: 0; } }
+
+    #worksheet-section { display: none; }
+    @media print {
+      body.worksheet-mode > div:not(#worksheet-section) { display: none !important; }
+      body.worksheet-mode #worksheet-section { display: block !important; }
+      body.worksheet-mode #toast { display: none !important; }
+      .ws-header { margin-bottom: 14px; }
+      .ws-header h1 { font-size: 15pt; font-weight: 700; color: #1e1b4b; margin: 0 0 4px; }
+      .ws-meta { font-size: 8.5pt; color: #64748b; display: flex; gap: 14px; flex-wrap: wrap; }
+      .ws-table { width: 100%; border-collapse: collapse; font-size: 9.5pt; table-layout: fixed; }
+      .ws-th { background: #f1f5f9; font-weight: 700; text-align: left; border: 1px solid #94a3b8; padding: 5px 6px; font-size: 8.5pt; color: #374151; }
+      .ws-cell { border: 1px solid #cbd5e1; padding: 5px 6px; vertical-align: top; height: 28pt; }
+      .ws-check { width: 4%; text-align: center; }
+      .ws-day { width: 7%; }
+      .ws-date { width: 14%; }
+      .ws-title { width: 18%; font-weight: 600; }
+      .ws-reagent { width: 21%; color: #475569; }
+      .ws-person { width: 12%; }
+      .ws-note { width: 24%; }
+      .ws-weekend { color: #ea580c; }
+      input[type="checkbox"] { width: 11pt; height: 11pt; }
+    }
   </style>
 </head>
 <body class="bg-slate-50 min-h-screen text-slate-800 font-sans">
@@ -214,6 +236,10 @@
           <i data-lucide="printer" class="w-4 h-4"></i>
           印刷
         </button>
+        <button onclick="printWorksheet()" class="no-print inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-100 transition">
+          <i data-lucide="clipboard-list" class="w-4 h-4"></i>
+          ワークシート印刷
+        </button>
         <button onclick="exportToICS()" class="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-bold text-white hover:bg-indigo-700 transition shadow-sm">
           <i data-lucide="download" class="w-4 h-4"></i>
           ICSを書き出す
@@ -254,6 +280,15 @@
             <div>
               <label class="block text-sm font-medium mb-1 text-slate-600">参照SOP / メモ</label>
               <input type="text" id="reference-sop" placeholder="例: SOP-DIF-003 / Day 2で細胞密度確認" class="w-full rounded-xl border border-slate-300 px-3 py-2.5 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-200" />
+            </div>
+            <div>
+              <label class="block text-sm font-medium mb-1 text-slate-600">ICSイベント名のフォーマット</label>
+              <select id="summary-format" onchange="setSummaryFormat(this.value)" class="w-full rounded-xl border border-slate-300 px-3 py-2.5 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-200 bg-white text-sm">
+                <option value="task_day_proto">Task Name_DayX_プロトコル名</option>
+                <option value="lab_proto_day_task">[Lab] プロトコル名 / Day X / Task Name</option>
+                <option value="proto_day_task">プロトコル名_DayX_Task Name</option>
+                <option value="day_task">Day X: Task Name（シンプル）</option>
+              </select>
             </div>
           </div>
 
@@ -319,6 +354,18 @@
             </div>
           </div>
 
+          <div class="mt-4 border-t border-slate-100 pt-4">
+            <div class="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">CSV（Excel / Google Sheets 連携）</div>
+            <div class="flex flex-wrap gap-2">
+              <button onclick="exportAsCsv()" class="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-100 transition">CSVエクスポート</button>
+              <label class="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-center text-sm font-semibold text-slate-700 hover:bg-slate-100 transition cursor-pointer">
+                CSV読込
+                <input type="file" accept=".csv,text/csv" class="hidden" onchange="importFromCsvFile(event)" />
+              </label>
+            </div>
+            <div class="mt-2 text-xs text-slate-400">形式: Day, タスク名, メモ/試薬（1行目をヘッダーにしても自動スキップ）</div>
+          </div>
+
           <div class="mt-4 rounded-2xl bg-slate-50 p-4 text-xs text-slate-500 space-y-1">
             <div>・共有リンクは手軽、JSONは長期保管向きです。</div>
             <div>・サーバーに保存しないため、共有はURLまたはファイルで行います。</div>
@@ -363,7 +410,7 @@
         </section>
 
         <section id="print-area" class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm print-card">
-          <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-5">
+          <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-5 no-print">
             <div>
               <h2 class="text-lg font-semibold flex items-center gap-2">
                 <i data-lucide="eye" class="w-5 h-5"></i>
@@ -431,6 +478,8 @@
     </div>
   </div>
 
+  <div id="worksheet-section"></div>
+
   <script>
     const STORAGE_KEYS = {
       current: 'lab_scheduler_current_v2',
@@ -440,6 +489,14 @@
     };
 
     const SHARE_VERSION = 2;
+
+    const SUMMARY_FORMATS = [
+      { id: 'task_day_proto', label: 'Task Name_DayX_プロトコル名', fn: (p, d, t) => `${t}_Day${d}_${p}` },
+      { id: 'lab_proto_day_task', label: '[Lab] プロトコル名 / Day X / Task Name', fn: (p, d, t) => `[Lab] ${p} / Day ${d} / ${t}` },
+      { id: 'proto_day_task', label: 'プロトコル名_DayX_Task Name', fn: (p, d, t) => `${p}_Day${d}_${t}` },
+      { id: 'day_task', label: 'Day X: Task Name（シンプル）', fn: (p, d, t) => `Day ${d}: ${t}` },
+    ];
+
     const COMMON_TASKS = [
       '培地交換', '分化誘導', '継代', '播種', '解凍', '凍結', '観察', 'サンプリング', 'QC', '染色'
     ];
@@ -479,6 +536,7 @@
     let lastAutoSavedAt = null;
     let daySortables = [];
     let slideTimelineMode = 'equal';
+    let summaryFormat = 'task_day_proto';
 
     window.onload = () => {
       loadAllFromStorage();
@@ -646,6 +704,7 @@
         lastAutoSavedAt,
         currentCustomPresetName,
         isCurrentPresetDirty,
+        summaryFormat,
         steps
       };
       localStorage.setItem(STORAGE_KEYS.current, JSON.stringify(data));
@@ -678,6 +737,7 @@
         lastAutoSavedAt = currentData.lastAutoSavedAt || null;
         currentCustomPresetName = currentData.currentCustomPresetName || null;
         isCurrentPresetDirty = Boolean(currentData.isCurrentPresetDirty && currentCustomPresetName);
+        summaryFormat = SUMMARY_FORMATS.find((f) => f.id === currentData.summaryFormat) ? currentData.summaryFormat : 'task_day_proto';
         steps = normalizeSteps(currentData.steps);
       } else {
         document.getElementById('project-name').value = '';
@@ -699,6 +759,13 @@
       updateProtocolMeta();
       updateSchedule();
       updateSaveStatus();
+      const fmtEl = document.getElementById('summary-format');
+      if (fmtEl) fmtEl.value = summaryFormat;
+    }
+
+    function setSummaryFormat(value) {
+      summaryFormat = SUMMARY_FORMATS.find((f) => f.id === value) ? value : 'task_day_proto';
+      saveState();
     }
 
     function migrateLegacyStorageIfNeeded() {
@@ -1315,7 +1382,6 @@
               <div class="font-bold text-indigo-900">${escapeHtml(step.title)}</div>
               <div class="mt-1 text-sm text-slate-500">${escapeHtml(step.desc || '—')}</div>
             </div>
-            <div class="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600 no-print">終日予定</div>
           </div>
         `;
         display.appendChild(card);
@@ -1356,7 +1422,9 @@
         lines.push('BEGIN:VEVENT');
         lines.push(...foldIcsLine(`UID:${uid}`));
         lines.push(...foldIcsLine(`DTSTAMP:${nowStamp}`));
-        lines.push(...foldIcsLine(`SUMMARY:[Lab] ${escapeIcsText(projectName)} / Day ${Number(step.day) || 0} / ${escapeIcsText(step.title || '')}`));
+        const fmt = SUMMARY_FORMATS.find((f) => f.id === summaryFormat) || SUMMARY_FORMATS[0];
+        const summaryStr = fmt.fn(projectName, Number(step.day) || 0, step.title || '');
+        lines.push(...foldIcsLine(`SUMMARY:${escapeIcsText(summaryStr)}`));
         lines.push(...foldIcsLine(`DTSTART;VALUE=DATE:${formatIcsDate(targetDate)}`));
         lines.push(...foldIcsLine(`DTEND;VALUE=DATE:${formatIcsDate(endDate)}`));
         lines.push(...foldIcsLine(`DESCRIPTION:${escapeIcsText(description)}`));
@@ -1756,7 +1824,7 @@
       const HEADER_H = 76;
       const DAY_HEADER_H = 36;
       const maxTasksPerDay = Math.max(1, ...Array.from(dateStepMap.values()).map((v) => v.length));
-      const CELL_H = Math.max(88, 48 + maxTasksPerDay * 32);
+      const CELL_H = Math.max(102, 62 + maxTasksPerDay * 32);
       const gridTop = HEADER_H + DAY_HEADER_H;
       const gridH = weeks.length * CELL_H;
       const H = gridTop + gridH + 4;
@@ -1806,13 +1874,19 @@
           const dateFW = hasSteps || isFirstOfMonth ? '700' : '400';
           p.push(`<text x="${cellX + cellW - 6}" y="${rowY + 17}" text-anchor="end" font-size="12" font-weight="${dateFW}" fill="${dateColor}">${dateLabel}</text>`);
 
+          // Day X ラベル（タスクあり日のみ、タスク一覧の上に1回表示）
+          if (hasSteps) {
+            const dayNum = stepsForDay[0].day;
+            p.push(`<text x="${cellX + 8}" y="${rowY + 28}" font-size="9.5" font-weight="700" fill="#a5b4fc">Day ${dayNum}</text>`);
+          }
+
           // タスク一覧
           stepsForDay.forEach((step, sIdx) => {
-            const taskY = rowY + 30 + sIdx * 32;
+            const taskY = rowY + 44 + sIdx * 32;
             const maxChars = Math.max(4, Math.floor((cellW - 12) / 8.5));
             const titleStr = step.title.length > maxChars ? step.title.slice(0, maxChars - 1) + '…' : step.title;
             p.push(`<text x="${cellX + 8}" y="${taskY}" font-size="11.5" font-weight="700" fill="#3730a3">${escapeHtml(titleStr)}</text>`);
-            if (step.desc && CELL_H >= 102) {
+            if (step.desc) {
               const dMax = Math.max(5, Math.floor((cellW - 12) / 7));
               const descStr = step.desc.length > dMax ? step.desc.slice(0, dMax - 1) + '…' : step.desc;
               p.push(`<text x="${cellX + 8}" y="${taskY + 13}" font-size="9.5" fill="#6366f1">${escapeHtml(descStr)}</text>`);
@@ -2047,6 +2121,140 @@
         showToast('PNG変換に失敗しました。SVG保存をお試しください。');
       };
       img.src = url;
+    }
+
+    function csvEscapeField(value) {
+      const str = String(value ?? '');
+      if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
+        return '"' + str.replace(/"/g, '""') + '"';
+      }
+      return str;
+    }
+
+    function parseCsvLine(line) {
+      const result = [];
+      let current = '';
+      let inQuotes = false;
+      for (let i = 0; i < line.length; i++) {
+        const ch = line[i];
+        if (inQuotes) {
+          if (ch === '"' && line[i + 1] === '"') { current += '"'; i++; }
+          else if (ch === '"') { inQuotes = false; }
+          else { current += ch; }
+        } else {
+          if (ch === '"') { inQuotes = true; }
+          else if (ch === ',') { result.push(current); current = ''; }
+          else { current += ch; }
+        }
+      }
+      result.push(current);
+      return result;
+    }
+
+    function exportAsCsv() {
+      const sortedSteps = getSortedSteps();
+      if (sortedSteps.length === 0) return showToast('ステップを追加してください');
+      const projectName = (document.getElementById('project-name').value || '').trim() || 'protocol';
+      const header = 'Day,タスク名,メモ/試薬';
+      const rows = sortedSteps.map((s) => `${Number(s.day) || 0},${csvEscapeField(s.title)},${csvEscapeField(s.desc)}`);
+      const blob = new Blob(['﻿' + [header, ...rows].join('\r\n')], { type: 'text/csv;charset=utf-8' });
+      downloadBlob(blob, `${sanitizeFilename(projectName)}_steps.csv`);
+      showToast('CSVファイルを保存しました');
+    }
+
+    function importFromCsvFile(event) {
+      const file = event.target.files && event.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const text = String(reader.result || '').replace(/^﻿/, '');
+          const lines = text.split(/\r?\n/).filter((l) => l.trim());
+          if (lines.length === 0) return showToast('CSVが空です');
+          const startIdx = isNaN(Number(parseCsvLine(lines[0])[0])) ? 1 : 0;
+          const imported = [];
+          for (let i = startIdx; i < lines.length; i++) {
+            const fields = parseCsvLine(lines[i]);
+            const day = Number(fields[0]);
+            if (!Number.isFinite(day)) continue;
+            imported.push({ id: generateId(), day, title: String(fields[1] || 'Task').trim() || 'Task', desc: String(fields[2] || '').trim(), order: 0 });
+          }
+          if (imported.length === 0) return showToast('有効な行がありませんでした');
+          if (hasMeaningfulCurrentState() && !confirm(`${imported.length}件のステップをCSVから読み込みます。現在のステップは置き換わります。`)) return;
+          steps = imported;
+          normalizeOrdering();
+          markCurrentPresetDirty();
+          renderTaskSuggestions();
+          renderSteps();
+          updateSchedule();
+          saveState();
+          showToast(`${imported.length}件のステップを読み込みました`);
+        } catch (e) {
+          console.error(e);
+          showToast('CSV読込に失敗しました');
+        } finally {
+          event.target.value = '';
+        }
+      };
+      reader.readAsText(file, 'utf-8');
+    }
+
+    function renderWorksheet() {
+      const projectName = (document.getElementById('project-name').value || '').trim() || 'Untitled Protocol';
+      const startDateVal = document.getElementById('start-date').value;
+      const creatorName = (document.getElementById('creator-name').value || '').trim() || '—';
+      const referenceSop = (document.getElementById('reference-sop').value || '').trim() || '—';
+      const baseDate = startDateVal ? parseLocalDateInput(startDateVal) : null;
+      const sortedSteps = getSortedSteps();
+
+      const rows = sortedSteps.map((step) => {
+        const targetDate = baseDate ? addDaysLocal(baseDate, Number(step.day) || 0) : null;
+        const isWeekend = targetDate && (targetDate.getDay() === 0 || targetDate.getDay() === 6);
+        const dateStr = targetDate ? formatDisplayDate(targetDate) : '—';
+        return `
+          <tr>
+            <td class="ws-cell ws-check"><input type="checkbox" /></td>
+            <td class="ws-cell ws-day">Day ${Number(step.day) || 0}</td>
+            <td class="ws-cell ws-date${isWeekend ? ' ws-weekend' : ''}">${escapeHtml(dateStr)}</td>
+            <td class="ws-cell ws-title">${escapeHtml(step.title)}</td>
+            <td class="ws-cell ws-reagent">${escapeHtml(step.desc || '')}</td>
+            <td class="ws-cell ws-person"></td>
+            <td class="ws-cell ws-note"></td>
+          </tr>`;
+      }).join('');
+
+      const metaParts = [`開始日: ${escapeHtml(startDateVal || '未設定')}`, `作成者: ${escapeHtml(creatorName)}`, `参照SOP: ${escapeHtml(referenceSop)}`, `計 ${sortedSteps.length} ステップ`];
+      return `
+        <div class="ws-header">
+          <h1>${escapeHtml(projectName)}</h1>
+          <div class="ws-meta">${metaParts.map((p) => `<span>${p}</span>`).join('')}</div>
+        </div>
+        <table class="ws-table">
+          <thead>
+            <tr>
+              <th class="ws-th ws-check">確認</th>
+              <th class="ws-th ws-day">Day</th>
+              <th class="ws-th ws-date">実施日</th>
+              <th class="ws-th ws-title">タスク名</th>
+              <th class="ws-th ws-reagent">試薬 / メモ</th>
+              <th class="ws-th ws-person">担当者</th>
+              <th class="ws-th ws-note">観察メモ</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>`;
+    }
+
+    function printWorksheet() {
+      if (getSortedSteps().length === 0) return showToast('ステップを追加してください');
+      document.getElementById('worksheet-section').innerHTML = renderWorksheet();
+      document.body.classList.add('worksheet-mode');
+      const cleanup = () => {
+        document.body.classList.remove('worksheet-mode');
+        window.removeEventListener('afterprint', cleanup);
+      };
+      window.addEventListener('afterprint', cleanup);
+      window.print();
     }
 
     function escapeJsString(str) {

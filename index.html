@@ -69,6 +69,50 @@
 <body class="bg-slate-50 min-h-screen text-slate-800 font-sans">
   <div id="toast"></div>
 
+  <!-- カレンダー編集用ステップモーダル -->
+  <div id="step-edit-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-900/60 p-4" onclick="handleStepEditorBackdrop(event)">
+    <form class="w-full max-w-md rounded-2xl bg-white shadow-2xl" onclick="event.stopPropagation()" onsubmit="saveStepEditor(); return false;">
+      <div class="flex items-center justify-between border-b border-slate-200 px-5 py-3">
+        <div>
+          <h2 id="step-edit-heading" class="text-base font-bold text-indigo-700">ステップ編集</h2>
+          <div id="step-edit-date" class="text-xs text-slate-500"></div>
+        </div>
+        <button type="button" onclick="closeStepEditor()" class="rounded-xl p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+      <div class="space-y-3 px-5 py-4">
+        <div>
+          <label class="block text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-1">Day</label>
+          <input type="number" id="step-edit-day" oninput="updateStepEditorDateLabel()" class="w-32 rounded-xl border border-slate-300 px-3 py-2 text-sm font-semibold outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-200" />
+        </div>
+        <div>
+          <label class="block text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-1">Task Name</label>
+          <input type="text" id="step-edit-title" list="task-suggestions" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-200" />
+          <div id="step-edit-suggestions" class="mt-2 flex flex-wrap gap-1.5"></div>
+        </div>
+        <div>
+          <label class="block text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-1">Notes / Reagents</label>
+          <input type="text" id="step-edit-desc" placeholder="例: Medium A / 細胞密度確認" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-200" />
+        </div>
+      </div>
+      <div class="flex items-center justify-between gap-2 border-t border-slate-200 px-5 py-3">
+        <div id="step-edit-existing-actions" class="flex gap-2">
+          <button type="button" onclick="duplicateFromStepEditor()" class="rounded-xl border border-slate-200 bg-white p-2 text-slate-600 hover:bg-slate-100 transition" title="複製">
+            <i data-lucide="copy" class="w-4 h-4"></i>
+          </button>
+          <button type="button" onclick="removeFromStepEditor()" class="rounded-xl border border-red-200 bg-white p-2 text-red-500 hover:bg-red-50 transition" title="削除">
+            <i data-lucide="trash-2" class="w-4 h-4"></i>
+          </button>
+        </div>
+        <div class="ml-auto flex gap-2">
+          <button type="button" onclick="closeStepEditor()" class="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100 transition">キャンセル</button>
+          <button type="submit" class="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-bold text-white hover:bg-indigo-700 transition shadow-sm">保存</button>
+        </div>
+      </div>
+    </form>
+  </div>
+
   <!-- How To Use モーダル -->
   <div id="howto-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-900/60 p-4" onclick="handleHowToBackdrop(event)">
     <div class="relative flex w-full max-w-2xl flex-col rounded-2xl bg-white shadow-2xl" style="max-height:90vh;" onclick="event.stopPropagation()">
@@ -393,11 +437,16 @@
                 <i data-lucide="list-checks" class="w-5 h-5"></i>
                 ステップ編集
               </h2>
-              <p class="text-xs text-slate-500 mt-1">各行のTask欄のすぐ下に候補を表示します。クリックだけで入力でき、行ったり来たりしません。</p>
+              <p id="step-view-hint" class="text-xs text-slate-500 mt-1">各行のTask欄のすぐ下に候補を表示します。クリックだけで入力でき、行ったり来たりしません。</p>
             </div>
             <div class="flex items-center gap-2 flex-wrap">
-              <div class="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
-                1画面で編集 → 右側で確認 → ICS出力
+              <div class="flex rounded-xl border border-slate-200 overflow-hidden text-xs">
+                <button id="step-view-btn-list" onclick="setStepViewMode('list')" class="inline-flex items-center gap-1 px-3 py-1.5 font-semibold bg-indigo-600 text-white transition">
+                  <i data-lucide="list" class="w-3.5 h-3.5"></i>リスト
+                </button>
+                <button id="step-view-btn-calendar" onclick="setStepViewMode('calendar')" class="inline-flex items-center gap-1 px-3 py-1.5 font-semibold bg-white text-slate-600 hover:bg-slate-100 transition">
+                  <i data-lucide="calendar" class="w-3.5 h-3.5"></i>カレンダー
+                </button>
               </div>
               <button onclick="addStep()" class="inline-flex items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-100 transition">
                 <i data-lucide="plus-circle" class="w-4 h-4"></i>
@@ -485,7 +534,8 @@
       current: 'lab_scheduler_current_v2',
       presets: 'lab_scheduler_presets_v2',
       legacyCurrent: 'lab_scheduler_current',
-      legacyPresets: 'lab_scheduler_presets'
+      legacyPresets: 'lab_scheduler_presets',
+      stepView: 'lab_scheduler_step_view'
     };
 
     const SHARE_VERSION = 2;
@@ -537,13 +587,20 @@
     let daySortables = [];
     let slideTimelineMode = 'equal';
     let summaryFormat = 'task_day_proto';
+    let stepViewMode = 'list';
+    let editingStepId = null;
+    let editingNewStepDay = null;
 
     window.onload = () => {
+      try { if (localStorage.getItem(STORAGE_KEYS.stepView) === 'calendar') stepViewMode = 'calendar'; } catch (_) {}
       loadAllFromStorage();
       bindBasicInputEvents();
       tryParseShareFromUrl();
+      setStepViewMode(stepViewMode);
       lucide.createIcons();
-      document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeHowTo(); });
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') { closeHowTo(); closeStepEditor(); }
+      });
     };
 
     function openHowTo() {
@@ -570,6 +627,7 @@
         const eventName = id === 'start-date' ? 'change' : 'input';
         el.addEventListener(eventName, () => {
           if (id === 'project-name' || id === 'creator-name' || id === 'reference-sop') markCurrentPresetDirty();
+          if (id === 'start-date' && stepViewMode === 'calendar') renderSteps();
           updateProtocolMeta();
           updateSchedule();
           saveState();
@@ -1095,6 +1153,7 @@
 
     function renderSteps() {
       destroySortables();
+      if (stepViewMode === 'calendar') return renderStepCalendar();
       const container = document.getElementById('steps-container');
       container.innerHTML = '';
       const sorted = getSortedSteps();
@@ -1173,6 +1232,180 @@
       lucide.createIcons();
     }
 
+    function setStepViewMode(mode) {
+      stepViewMode = mode === 'calendar' ? 'calendar' : 'list';
+      try { localStorage.setItem(STORAGE_KEYS.stepView, stepViewMode); } catch (_) {}
+      const activeClass = 'inline-flex items-center gap-1 px-3 py-1.5 font-semibold bg-indigo-600 text-white transition';
+      const inactiveClass = 'inline-flex items-center gap-1 px-3 py-1.5 font-semibold bg-white text-slate-600 hover:bg-slate-100 transition';
+      document.getElementById('step-view-btn-list').className = stepViewMode === 'list' ? activeClass : inactiveClass;
+      document.getElementById('step-view-btn-calendar').className = stepViewMode === 'calendar' ? activeClass : inactiveClass;
+      document.getElementById('step-view-hint').textContent = stepViewMode === 'calendar'
+        ? 'タスクをクリックで編集、＋で追加、ドラッグで別の日へ移動できます。'
+        : '各行のTask欄のすぐ下に候補を表示します。クリックだけで入力でき、行ったり来たりしません。';
+      renderSteps();
+    }
+
+    // 開始日があれば月曜始まりの週、なければ Day 番号を7日ずつ並べる
+    function getStepCalendarCells(sorted) {
+      const days = sorted.map((s) => Number(s.day) || 0);
+      const startDay = Math.min(0, ...days);
+      const endDay = Math.max(startDay + 13, Math.max(0, ...days) + 7);
+      const baseDate = parseLocalDateInput(document.getElementById('start-date').value);
+      let firstDay = startDay;
+      let lastDay = endDay;
+      if (baseDate) {
+        firstDay = startDay - ((addDaysLocal(baseDate, startDay).getDay() + 6) % 7);
+        lastDay = endDay + ((7 - addDaysLocal(baseDate, endDay).getDay()) % 7);
+      } else {
+        lastDay = firstDay + Math.ceil((endDay - firstDay + 1) / 7) * 7 - 1;
+      }
+      const cells = [];
+      for (let day = firstDay; day <= lastDay; day++) {
+        cells.push({ day, date: baseDate ? addDaysLocal(baseDate, day) : null });
+      }
+      return { cells, hasDate: !!baseDate, minStepDay: startDay };
+    }
+
+    function renderStepCalendar() {
+      const container = document.getElementById('steps-container');
+      const sorted = getSortedSteps();
+      const { cells, hasDate, minStepDay } = getStepCalendarCells(sorted);
+      const todayKey = getTodayLocalInputValue();
+      const byDay = new Map();
+      sorted.forEach((step) => {
+        const day = Number(step.day) || 0;
+        if (!byDay.has(day)) byDay.set(day, []);
+        byDay.get(day).push(step);
+      });
+
+      const header = hasDate
+        ? ['月', '火', '水', '木', '金', '土', '日'].map((name, i) => {
+            const color = i === 6 ? 'text-red-600' : i === 5 ? 'text-blue-600' : 'text-slate-600';
+            return `<div class="border-b border-slate-200 bg-slate-100 py-1.5 text-center text-xs font-bold ${color}">${name}</div>`;
+          }).join('')
+        : '';
+
+      const cellHtml = cells.map(({ day, date }) => {
+        const dow = date ? date.getDay() : -1;
+        const isBeforeStart = day < minStepDay;
+        const isToday = date && formatInputDate(date) === todayKey;
+        const bg = isBeforeStart ? 'bg-slate-50' : dow === 6 ? 'bg-blue-50/40' : dow === 0 ? 'bg-red-50/40' : 'bg-white';
+        const dateColor = dow === 0 ? 'text-red-500' : dow === 6 ? 'text-blue-500' : 'text-slate-400';
+        const dateLabel = date ? `${date.getMonth() + 1}/${date.getDate()}` : '';
+        const chips = (byDay.get(day) || []).map((step) => `
+          <div class="drag-handle cursor-pointer rounded-lg border border-indigo-200 bg-indigo-50 px-2 py-1 hover:bg-indigo-100 transition" data-step-id="${escapeHtml(step.id)}" onclick="openStepEditor('${escapeJsString(step.id)}')" title="${escapeHtml(step.desc ? `${step.title} / ${step.desc}` : step.title)}">
+            <div class="truncate text-xs font-bold text-indigo-900">${escapeHtml(step.title)}</div>
+            ${step.desc ? `<div class="truncate text-[10px] text-indigo-500">${escapeHtml(step.desc)}</div>` : ''}
+          </div>
+        `).join('');
+        return `
+          <div class="flex min-h-[112px] min-w-0 flex-col border-b border-r border-slate-200 p-1.5 ${bg} ${isToday ? 'ring-2 ring-inset ring-amber-400' : ''}">
+            <div class="flex items-center justify-between gap-1 text-[11px]">
+              <span class="font-extrabold ${day === 0 ? 'text-indigo-700' : 'text-slate-500'}">Day ${day}</span>
+              <span class="font-semibold ${dateColor}">${dateLabel}</span>
+            </div>
+            <div class="day-steps mt-1 flex-1 space-y-1 min-h-[36px]" data-day="${day}">${chips}</div>
+            <button type="button" onclick="openNewStepEditor(${day})" class="mt-1 rounded-md py-0.5 text-[11px] text-slate-300 hover:bg-indigo-50 hover:text-indigo-600 transition" title="Day ${day} にタスク追加">＋</button>
+          </div>
+        `;
+      }).join('');
+
+      container.innerHTML = `
+        ${hasDate ? '' : '<div class="mb-2 text-xs text-slate-400">開始日を入れると曜日・日付付きのカレンダーになります。</div>'}
+        <div class="overflow-x-auto rounded-xl border-l border-t border-slate-200">
+          <div class="grid min-w-[720px] grid-cols-7">${header}${cellHtml}</div>
+        </div>
+      `;
+      container.querySelectorAll('.day-steps').forEach((list) => initSortableForDayList(list));
+    }
+
+    function openStepEditor(stepId) {
+      const step = steps.find((s) => s.id === stepId);
+      if (!step) return;
+      editingStepId = stepId;
+      editingNewStepDay = null;
+      showStepEditor('ステップ編集', step);
+    }
+
+    function openNewStepEditor(day) {
+      editingStepId = null;
+      editingNewStepDay = Number(day) || 0;
+      showStepEditor('タスク追加', { day: editingNewStepDay, title: '', desc: '' });
+    }
+
+    function showStepEditor(heading, step) {
+      document.getElementById('step-edit-heading').textContent = heading;
+      document.getElementById('step-edit-day').value = Number(step.day) || 0;
+      document.getElementById('step-edit-title').value = step.title || '';
+      document.getElementById('step-edit-desc').value = step.desc || '';
+      document.getElementById('step-edit-existing-actions').classList.toggle('invisible', !editingStepId);
+      document.getElementById('step-edit-suggestions').innerHTML = getInlineTaskSuggestions(step.title).slice(0, 10).map((task) => `
+        <button type="button" onclick="document.getElementById('step-edit-title').value = '${escapeHtml(escapeJsString(task))}'" class="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-100 transition">${escapeHtml(task)}</button>
+      `).join('');
+      updateStepEditorDateLabel();
+      const modal = document.getElementById('step-edit-modal');
+      modal.classList.remove('hidden');
+      modal.classList.add('flex');
+      lucide.createIcons();
+      document.getElementById('step-edit-title').focus();
+    }
+
+    function updateStepEditorDateLabel() {
+      const day = Number(document.getElementById('step-edit-day').value) || 0;
+      const baseDate = parseLocalDateInput(document.getElementById('start-date').value);
+      document.getElementById('step-edit-date').textContent = baseDate
+        ? `Day ${day} = ${formatDisplayDate(addDaysLocal(baseDate, day))}`
+        : `Day ${day}`;
+    }
+
+    function closeStepEditor() {
+      const modal = document.getElementById('step-edit-modal');
+      modal.classList.add('hidden');
+      modal.classList.remove('flex');
+      editingStepId = null;
+      editingNewStepDay = null;
+    }
+
+    function handleStepEditorBackdrop(e) {
+      if (e.target === document.getElementById('step-edit-modal')) closeStepEditor();
+    }
+
+    function saveStepEditor() {
+      const day = Number(document.getElementById('step-edit-day').value) || 0;
+      const title = document.getElementById('step-edit-title').value.trim() || '新規タスク';
+      const desc = document.getElementById('step-edit-desc').value.trim();
+      if (editingStepId) {
+        const step = steps.find((s) => s.id === editingStepId);
+        if (step) {
+          // Day変更時はその日の末尾へ
+          if ((Number(step.day) || 0) !== day) step.order = Number.MAX_SAFE_INTEGER;
+          Object.assign(step, { day, title, desc });
+        }
+        closeStepEditor();
+        normalizeOrdering();
+        markCurrentPresetDirty();
+        renderTaskSuggestions();
+        renderSteps();
+        updateSchedule();
+        saveState();
+      } else {
+        closeStepEditor();
+        addStep({ day, title, desc, order: Number.MAX_SAFE_INTEGER });
+      }
+    }
+
+    function duplicateFromStepEditor() {
+      const id = editingStepId;
+      closeStepEditor();
+      if (id) duplicateStep(id);
+    }
+
+    function removeFromStepEditor() {
+      const id = editingStepId;
+      closeStepEditor();
+      if (id) removeStep(id);
+    }
+
     function initSortableForDayList(listEl) {
       const sortable = new Sortable(listEl, {
         group: 'daySteps',
@@ -1243,7 +1476,7 @@
         day: Number.isFinite(Number(prefill.day)) ? Number(prefill.day) : lastDay,
         title: String(prefill.title || '新規タスク'),
         desc: String(prefill.desc || ''),
-        order: 0
+        order: Number.isFinite(Number(prefill.order)) ? Number(prefill.order) : 0
       });
       normalizeOrdering();
       markCurrentPresetDirty();

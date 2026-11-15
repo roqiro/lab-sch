@@ -69,6 +69,35 @@
 <body class="bg-slate-50 min-h-screen text-slate-800 font-sans">
   <div id="toast"></div>
 
+  <!-- 新規プロトコル作成モーダル -->
+  <div id="new-protocol-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-900/60 p-4" onclick="handleNewProtocolBackdrop(event)">
+    <div class="flex w-full max-w-lg flex-col rounded-2xl bg-white shadow-2xl" style="max-height:90vh;" onclick="event.stopPropagation()">
+      <div class="flex flex-shrink-0 items-center justify-between border-b border-slate-200 px-5 py-3">
+        <h2 class="flex items-center gap-2 text-base font-bold text-emerald-700">
+          <i data-lucide="file-plus" class="w-5 h-5"></i>
+          新規プロトコル作成
+        </h2>
+        <button type="button" onclick="closeNewProtocolModal()" class="rounded-xl p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+      <div class="flex-1 space-y-4 overflow-y-auto px-5 py-4">
+        <div id="new-protocol-save-note" class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600"></div>
+        <button type="button" onclick="startNewProtocol(null)" class="flex w-full items-center gap-3 rounded-xl border-2 border-dashed border-emerald-300 bg-emerald-50/50 px-4 py-3 text-left hover:bg-emerald-50 transition">
+          <i data-lucide="file" class="w-5 h-5 text-emerald-600"></i>
+          <div>
+            <div class="text-sm font-bold text-emerald-800">まっさらから作成</div>
+            <div class="text-xs text-emerald-700/80">ステップ・SOPを空にして始めます</div>
+          </div>
+        </button>
+        <div>
+          <div class="mb-2 text-xs font-bold uppercase tracking-wide text-slate-400">既存のプロトコルを引用して作成</div>
+          <div id="new-protocol-source-list" class="space-y-2"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- カレンダー編集用ステップモーダル -->
   <div id="step-edit-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-900/60 p-4" onclick="handleStepEditorBackdrop(event)">
     <form class="w-full max-w-md rounded-2xl bg-white shadow-2xl" onclick="event.stopPropagation()" onsubmit="saveStepEditor(); return false;">
@@ -276,6 +305,10 @@
           <i data-lucide="help-circle" class="w-4 h-4"></i>
           使い方
         </button>
+        <button onclick="openNewProtocolModal()" class="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-700 hover:bg-emerald-100 transition">
+          <i data-lucide="file-plus" class="w-4 h-4"></i>
+          新規プロトコル
+        </button>
         <button onclick="window.print()" class="no-print inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 transition">
           <i data-lucide="printer" class="w-4 h-4"></i>
           印刷
@@ -318,7 +351,7 @@
               </div>
               <div>
                 <label class="block text-sm font-medium mb-1 text-slate-600">作成者</label>
-                <input type="text" id="creator-name" placeholder="例: Taku" class="w-full rounded-xl border border-slate-300 px-3 py-2.5 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-200" />
+                <input type="text" id="creator-name" placeholder="例: 山田 太郎" class="w-full rounded-xl border border-slate-300 px-3 py-2.5 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-200" />
               </div>
             </div>
             <div>
@@ -599,7 +632,7 @@
       setStepViewMode(stepViewMode);
       lucide.createIcons();
       document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') { closeHowTo(); closeStepEditor(); }
+        if (e.key === 'Escape') { closeHowTo(); closeStepEditor(); closeNewProtocolModal(); }
       });
     };
 
@@ -1033,6 +1066,104 @@
       updateProtocolMeta();
       saveState();
       showToast(`「${name}」を保存しました`);
+    }
+
+    function needsAutoSaveBeforeNew() {
+      if (!hasMeaningfulCurrentState()) return false;
+      return !currentCustomPresetName || isCurrentPresetDirty;
+    }
+
+    // 読込中のプロトコルはその名前で、未保存のドラフトは重複しない名前で保存
+    function getAutoSaveName() {
+      if (currentCustomPresetName) return currentCustomPresetName;
+      const projectName = (document.getElementById('project-name').value || '').trim();
+      const base = projectName || `無題 ${formatDateTimeJa(nowIso())}`;
+      if (!customPresets[base]) return base;
+      let counter = 2;
+      while (customPresets[`${base} (${counter})`]) counter += 1;
+      return `${base} (${counter})`;
+    }
+
+    function autoSaveCurrentProtocol() {
+      const name = getAutoSaveName();
+      const now = nowIso();
+      const existing = customPresets[name];
+      customPresets[name] = {
+        name,
+        creatorName: (document.getElementById('creator-name').value || '').trim(),
+        referenceSop: document.getElementById('reference-sop').value || '',
+        createdAt: existing?.createdAt || currentCreatedAt || now,
+        updatedAt: now,
+        steps: cloneStepsForPreset(steps)
+      };
+      persistCustomPresets();
+      return name;
+    }
+
+    function openNewProtocolModal() {
+      const note = document.getElementById('new-protocol-save-note');
+      note.textContent = needsAutoSaveBeforeNew()
+        ? `編集中の内容は「${getAutoSaveName()}」として保存済みプロトコルに保存されます。`
+        : '編集中の内容は保存済みです（または空のため保存しません）。';
+
+      const saved = Object.values(customPresets)
+        .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')))
+        .map((preset) => ({ kind: 'custom', key: preset.name, name: preset.name, sub: `${preset.steps.length} ステップ / 更新: ${formatDateTimeJa(preset.updatedAt)}` }));
+      const builtin = Object.entries(BUILTIN_PRESETS)
+        .map(([key, preset]) => ({ kind: 'builtin', key, name: preset.name, sub: `標準プリセット / ${preset.steps.length} ステップ` }));
+      document.getElementById('new-protocol-source-list').innerHTML = [...saved, ...builtin].map((item) => `
+        <button type="button" onclick="startNewProtocol({ kind: '${item.kind}', key: '${escapeHtml(escapeJsString(item.key))}' })" class="flex w-full items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-left hover:border-indigo-300 hover:bg-indigo-50 transition">
+          <div class="min-w-0">
+            <div class="truncate text-sm font-semibold text-slate-800">${escapeHtml(item.name)}</div>
+            <div class="text-xs text-slate-500">${escapeHtml(item.sub)}</div>
+          </div>
+          <i data-lucide="copy-plus" class="w-4 h-4 flex-shrink-0 text-indigo-500"></i>
+        </button>
+      `).join('');
+
+      const modal = document.getElementById('new-protocol-modal');
+      modal.classList.remove('hidden');
+      modal.classList.add('flex');
+      lucide.createIcons();
+    }
+
+    function closeNewProtocolModal() {
+      const modal = document.getElementById('new-protocol-modal');
+      modal.classList.add('hidden');
+      modal.classList.remove('flex');
+    }
+
+    function handleNewProtocolBackdrop(e) {
+      if (e.target === document.getElementById('new-protocol-modal')) closeNewProtocolModal();
+    }
+
+    function startNewProtocol(source) {
+      const template = !source ? null
+        : source.kind === 'builtin' ? BUILTIN_PRESETS[source.key]
+        : customPresets[source.key];
+      if (source && !template) return showToast('引用元のプロトコルが見つかりません');
+      const sourceName = template ? (template.name || source.key) : '';
+      const savedName = needsAutoSaveBeforeNew() ? autoSaveCurrentProtocol() : null;
+
+      steps = template
+        ? normalizeSteps(template.steps).map((s) => ({ ...s, id: generateId() }))
+        : [getDefaultStep()];
+      document.getElementById('project-name').value = template ? `${sourceName}（コピー）` : '';
+      document.getElementById('reference-sop').value = template ? (template.referenceSop || '') : '';
+      document.getElementById('start-date').value = getTodayLocalInputValue();
+      currentCreatedAt = null;
+      currentUpdatedAt = null;
+      setCurrentPresetState(null, false);
+      closeNewProtocolModal();
+      normalizeOrdering();
+      renderTaskSuggestions();
+      renderSteps();
+      updateProtocolMeta();
+      updateSchedule();
+      saveState();
+
+      const started = template ? `「${sourceName}」を引用して新規作成` : 'まっさらな新規プロトコルを作成';
+      showToast(savedName ? `「${savedName}」を保存し、${started}しました` : `${started}しました`);
     }
 
     function renamePreset(oldName) {
